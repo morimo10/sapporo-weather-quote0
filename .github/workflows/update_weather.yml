@@ -34,10 +34,10 @@ jobs:
         API_KEY = os.environ.get("QUOTE0_API_KEY")
         DEVICE_ID = os.environ.get("QUOTE0_DEVICE_ID")
 
-        # 1. 札幌の座標（気象庁 JMAモデル指定）
-        OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast?latitude=43.0621&longitude=141.3544&hourly=temperature_2m,precipitation_probability,weather_code&timezone=Asia%2FTokyo&models=jma"
+        # 1. 札幌の座標（エラー回避のため、通常の高品質マルチモデル予測URLに変更）
+        OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast?latitude=43.0621&longitude=141.3544&hourly=temperature_2m,precipitation_probability,weather_code&timezone=Asia%2FTokyo"
         
-        # マニュアル指定の正しいエンドポイントURL
+        # Dot. APIエンドポイントURL
         DOT_API_URL = f"https://dot.mindreset.tech/api/authV2/open/device/{DEVICE_ID}/text"
 
         # 天気コード（WMO）を絵文字にマッピング
@@ -62,7 +62,14 @@ jobs:
 
         try:
             # 天気データの取得
-            res = requests.get(OPEN_METEO_URL).json()
+            response_weather = requests.get(OPEN_METEO_URL)
+            res = response_weather.json()
+            
+            # APIエラーチェック
+            if 'hourly' not in res:
+                print(f"Open-Meteo APIエラーレスポンス: {res}")
+                exit(1)
+                
             hourly = res['hourly']
             
             jst = timezone(timedelta(hours=9))
@@ -77,17 +84,26 @@ jobs:
             for idx in target_indices:
                 if idx < len(times):
                     t = times[idx].strftime("%H:%M")
-                    temp = f"{hourly['temperature_2m'][idx]}°C"
-                    prob = f"{hourly['precipitation_probability'][idx]}%"
+                    temp_val = hourly['temperature_2m'][idx]
+                    prob_val = hourly['precipitation_probability'][idx]
                     code = hourly['weather_code'][idx]
                     
                     emoji = get_weather_emoji(code)
-                    clothing = get_clothing_advice(hourly['temperature_2m'][idx])
+                    clothing = get_clothing_advice(temp_val)
                     
-                    # 【右寄せレイアウト設定】単位の末尾をタテにきれいに揃える
-                    forecast_lines.append(f"{t} {emoji} {temp:>7} {prob:>5} {clothing}")
+                    # 文字列として成形
+                    temp_str = f"{temp_val}°C"
+                    prob_str = f"{prob_val}%"
+                    
+                    # 【確実な右寄せ処理】
+                    # 指定した文字数（7文字 / 4文字）に満たない場合、左側に半角スペースを詰めます
+                    temp_aligned = temp_str.rjust(7)
+                    prob_aligned = prob_str.rjust(4)
+                    
+                    # 1行を組み立て (時刻 絵文字 気温 降水確率 服装)
+                    forecast_lines.append(f"{t} {emoji} {temp_aligned} {prob_aligned} {clothing}")
             
-            # 【重要】マニュアルの指定通り、文字列リテラル内での改行を保持するため「\\n」で結合
+            # 文字列リテラル内での改行を保持するため「\\n」で結合
             weather_message = "\\n".join(forecast_lines)
             
             print("--- 送信データ内容ログ ---")
@@ -95,16 +111,16 @@ jobs:
             print(f"Message:\n{weather_message.replace('\\n', '\n')}")
             print("------------------------")
 
-            # 2. マニュアルに従ったヘッダーとパラメータの構築
+            # 2. Dot. APIへ送信するヘッダーとパラメータ
             headers = {
                 "Authorization": f"Bearer {API_KEY}",
                 "Content-Type": "application/json"
             }
             
             payload = {
-                "refreshNow": True,     # 即時表示フラグ
-                "title": "札幌市",       # 画面上部のタイトル
-                "message": weather_message # 予報テキスト本文
+                "refreshNow": True,
+                "title": "札幌市",
+                "message": weather_message
             }
             
             # APIリクエストの送信
