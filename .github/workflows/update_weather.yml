@@ -1,0 +1,128 @@
+name: Update Weather and Clothing for Quote/0
+
+on:
+  schedule:
+    # 30分ごとに自動実行 (毎時0分、30分にトリガー)
+    - cron: '0,30 * * * *'
+  workflow_dispatch: # Actionsタブから手動で即時実行できるボタンを有効化
+
+jobs:
+  update-weather:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.x'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests
+
+    - name: Generate and Push to Quote/0 API
+      env:
+        # GitHub Secretsに保存したAPIキーを安全に読み込む
+        QUOTE0_API_KEY: ${{ secrets.QUOTE0_API_KEY }}
+      run: |
+        python - << 'EOF'
+        import os
+        import requests
+        from datetime import datetime, timedelta, timezone
+
+        # 1. 札幌の座標（気象庁 JMAモデル指定）
+        URL = "https://api.open-meteo.com/v1/forecast?latitude=43.0621&longitude=141.3544&hourly=temperature_2m,precipitation_probability,weather_code&timezone=Asia%2FTokyo&models=jma"
+        
+        # Quote/0側のText API更新用エンドポイントURL
+        QUOTE0_API_URL = "https://api.quote0.link/v1/text" 
+        API_KEY = os.environ.get("QUOTE0_API_KEY")
+
+        # 天気コード（WMO）を絵文字にマッピング
+        def get_weather_emoji(code):
+            if code == 0: return "☀️"
+            elif code in [1, 2, 3]: return "⛅"
+            elif code in [45, 48]: return "🌫️"
+            elif code in [51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82]: return "☔"
+            elif code in [71, 73, 75, 77, 85, 86]: return "❄️"
+            elif code in [95, 96, 99]: return "⚡"
+            return "❓"
+
+        # 気温に応じた衣類・服装情報の判定ロジック
+        def get_clothing_advice(temp):
+            if temp >= 25.0:
+                return "半袖シャツ"
+            elif temp >= 20.0:
+                return "長袖シャツ"
+            elif temp >= 16.0:
+                return "カーディガン"
+            elif temp >= 12.0:
+                return "セーター"
+            elif temp >= 8.0:
+                return "トレンチコート"
+            elif temp >= 5.0:
+                return "冬物コート"
+            else:
+                return "ダウンコート"
+
+        try:
+            # Open-Meteo APIから最新の気象データを取得
+            res = requests.get(URL).json()
+            hourly = res['hourly']
+            
+            # 日本時間 (JST) の現在時刻を取得
+            jst = timezone(timedelta(hours=9))
+            now = datetime.now(jst)
+            
+            # 取得データの時間軸をJSTに変換
+            times = [datetime.fromisoformat(t).replace(tzinfo=jst) for t in hourly['time']]
+            
+            # 現在時刻に一番近いデータのインデックスを検索
+            current_idx = min(range(len(times)), key=lambda i: abs(times[i] - now))
+            
+            # 「現在」「3時間後」「6時間後」のインデックスを指定
+            target_indices = [current_idx, current_idx + 3, current_idx + 6]
+            
+            # 1行目にタイトルを設定
+            lines = ["札幌市"]
+            
+            # 3回ループして指定時間ごとのデータを成形
+            for idx in target_indices:
+                if idx < len(times):
+                    t = times[idx].strftime("%H:%M")
+                    temp = hourly['temperature_2m'][idx]
+                    prob = hourly['precipitation_probability'][idx]
+                    code = hourly['weather_code'][idx]
+                    
+                    emoji = get_weather_emoji(code)
+                    clothing = get_clothing_advice(temp)
+                    
+                    # 予報行のフォーマット: 「時刻 絵文字 気温 降水確率 服装」
+                    lines.append(f"{t} {emoji} {temp}°C {prob}% {clothing}")
+            
+            # 改行で結合して最終テキストを作成
+            weather_text = "\n".join(lines)
+            print("--- 送信データ内容ログ ---")
+            print(weather_text)
+            print("------------------------")
+
+            # 2. Quote/0のText APIへJSON形式でデータをPOST送信
+            headers = {
+                "Authorization": f"Bearer {API_KEY}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "text": weather_text
+            }
+            
+            response = requests.post(QUOTE0_API_URL, headers=headers, json=payload)
+            
+            if response.status_code in [200, 201]:
+                print("Quote/0 APIの更新に成功しました！")
+            else:
+                print(f"Quote/0 APIエラー: {response.status_code} - {response.text}")
+                exit(1)
+
+        except Exception as e:
+            print(f"Error: {e}")
+            exit(1)
+        EOF
