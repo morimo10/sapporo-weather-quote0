@@ -34,7 +34,7 @@ jobs:
         API_KEY = os.environ.get("QUOTE0_API_KEY")
         DEVICE_ID = os.environ.get("QUOTE0_DEVICE_ID")
 
-        # 1. 札幌の座標（エラー回避のため、通常の高品質マルチモデル予測URLに変更）
+        # 1. 札幌の座標（エラー原因だった &models=jma を削除した確実なURL）
         OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast?latitude=43.0621&longitude=141.3544&hourly=temperature_2m,precipitation_probability,weather_code&timezone=Asia%2FTokyo"
         
         # Dot. APIエンドポイントURL
@@ -65,7 +65,7 @@ jobs:
             response_weather = requests.get(OPEN_METEO_URL)
             res = response_weather.json()
             
-            # APIエラーチェック
+            # APIエラーチェック（hourlyがない場合は詳細をログに出す）
             if 'hourly' not in res:
                 print(f"Open-Meteo APIエラーレスポンス: {res}")
                 exit(1)
@@ -96,7 +96,7 @@ jobs:
                     prob_str = f"{prob_val}%"
                     
                     # 【確実な右寄せ処理】
-                    # 指定した文字数（7文字 / 4文字）に満たない場合、左側に半角スペースを詰めます
+                    # rjust を使って指定文字数に満たない分、確実に左側に半角スペースを詰めます
                     temp_aligned = temp_str.rjust(7)
                     prob_aligned = prob_str.rjust(4)
                     
