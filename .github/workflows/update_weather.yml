@@ -1,4 +1,4 @@
-name: Update Weather and Clothing for Quote/0
+name: Update Weather and Clothing for Quote/0 V2
 
 on:
   schedule:
@@ -20,22 +20,26 @@ jobs:
         python -m pip install --upgrade pip
         pip install requests
 
-    - name: Generate and Push to Quote/0 API
+    - name: Generate and Push to Quote/0 V2 API
       env:
-        # GitHub Secretsに保存したAPIキーを安全に読み込む
+        # GitHub SecretsからAPIキーとデバイスIDを安全に読み込む
         QUOTE0_API_KEY: ${{ secrets.QUOTE0_API_KEY }}
+        QUOTE0_DEVICE_ID: ${{ secrets.QUOTE0_DEVICE_ID }}
       run: |
         python - << 'EOF'
         import os
         import requests
         from datetime import datetime, timedelta, timezone
 
-        # 1. 札幌の座標（気象庁 JMAモデル指定）
-        URL = "https://api.open-meteo.com/v1/forecast?latitude=43.0621&longitude=141.3544&hourly=temperature_2m,precipitation_probability,weather_code&timezone=Asia%2FTokyo&models=jma"
-        
-        # Quote/0側のText API更新用エンドポイントURL
-        QUOTE0_API_URL = "https://api.quote0.link/v1/text" 
+        # 1. 環境変数の取得
         API_KEY = os.environ.get("QUOTE0_API_KEY")
+        DEVICE_ID = os.environ.get("QUOTE0_DEVICE_ID")
+
+        # 2. 札幌の座標（気象庁 JMAモデル指定）
+        OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast?latitude=43.0621&longitude=141.3544&hourly=temperature_2m,precipitation_probability,weather_code&timezone=Asia%2FTokyo&models=jma"
+        
+        # 新しいV2エンドポイントURL（デバイスIDをURLに埋め込み）
+        QUOTE0_API_URL = f"https://dot.mindreset.tech/api/authV2/open/device/{DEVICE_ID}/text"
 
         # 天気コード（WMO）を絵文字にマッピング
         def get_weather_emoji(code):
@@ -66,7 +70,7 @@ jobs:
 
         try:
             # Open-Meteo APIから最新の気象データを取得
-            res = requests.get(URL).json()
+            res = requests.get(OPEN_METEO_URL).json()
             hourly = res['hourly']
             
             # 日本時間 (JST) の現在時刻を取得
@@ -82,8 +86,7 @@ jobs:
             # 「現在」「3時間後」「6時間後」のインデックスを指定
             target_indices = [current_idx, current_idx + 3, current_idx + 6]
             
-            # 1行目にタイトルを設定
-            lines = ["札幌市"]
+            forecast_lines = []
             
             # 3回ループして指定時間ごとのデータを成形
             for idx in target_indices:
@@ -96,32 +99,37 @@ jobs:
                     emoji = get_weather_emoji(code)
                     clothing = get_clothing_advice(hourly['temperature_2m'][idx])
                     
-                    # 【レイアウト調整の核心】
-                    # :>6 は「6文字分を確保して右寄せ」、:>4 は「4文字分を確保して右寄せ」という意味です。
-                    # これにより、文字数が変動しても後ろの「服装」の開始位置が揃います。
-                    lines.append(f"{t} {emoji} {temp:>6} {prob:>4} {clothing}")
+                    # 各項目の「左側の開始位置」を縦に揃えるためのフォーマット (左寄せ)
+                    forecast_lines.append(f"{t} {emoji} {temp:<7} {prob:<5} {clothing}")
             
-            # 改行で結合して最終テキストを作成
-            weather_text = "\n".join(lines)
+            # 予報本文を改行で結合
+            weather_message = "\n".join(forecast_lines)
+            
             print("--- 送信データ内容ログ ---")
-            print(weather_text)
+            print(f"Title  : 札幌市")
+            print(f"Message:\n{weather_message}")
             print("------------------------")
 
-            # 2. Quote/0のText APIへJSON形式でデータをPOST送信
+            # 3. 新仕様（V2）に従ってヘッダーとパラメータを構築
             headers = {
                 "Authorization": f"Bearer {API_KEY}",
                 "Content-Type": "application/json"
             }
+            
+            # ドキュメントに指定されたリクエスト構造（title, message, refreshNowなど）
             payload = {
-                "text": weather_text
+                "title": "札幌市",
+                "message": weather_message,
+                "refreshNow": True  # デバイスへ即時更新をかけるフラグ
             }
             
+            # 新しいURLへ送信
             response = requests.post(QUOTE0_API_URL, headers=headers, json=payload)
             
             if response.status_code in [200, 201]:
-                print("Quote/0 APIの更新に成功しました！")
+                print("Quote/0 V2 APIの更新に成功しました！")
             else:
-                print(f"Quote/0 APIエラー: {response.status_code} - {response.text}")
+                print(f"Quote/0 V2 APIエラー: {response.status_code} - {response.text}")
                 exit(1)
 
         except Exception as e:
