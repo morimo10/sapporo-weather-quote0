@@ -20,9 +20,9 @@ jobs:
         python -m pip install --upgrade pip
         pip install requests
 
-    - name: Generate and Push to Quote/0 V2 API
+    - name: Generate and Push to Dot API
       env:
-        # GitHub SecretsからAPIキーとデバイスIDを安全に読み込む
+        # GitHub Secretsから安全に読み込み
         QUOTE0_API_KEY: ${{ secrets.QUOTE0_API_KEY }}
         QUOTE0_DEVICE_ID: ${{ secrets.QUOTE0_DEVICE_ID }}
       run: |
@@ -31,15 +31,14 @@ jobs:
         import requests
         from datetime import datetime, timedelta, timezone
 
-        # 1. 環境変数の取得
         API_KEY = os.environ.get("QUOTE0_API_KEY")
         DEVICE_ID = os.environ.get("QUOTE0_DEVICE_ID")
 
-        # 2. 札幌の座標（気象庁 JMAモデル指定）
+        # 1. 札幌の座標（気象庁 JMAモデル指定）
         OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast?latitude=43.0621&longitude=141.3544&hourly=temperature_2m,precipitation_probability,weather_code&timezone=Asia%2FTokyo&models=jma"
         
-        # 新しいV2エンドポイントURL（デバイスIDをURLに埋め込み）
-        QUOTE0_API_URL = f"https://dot.mindreset.tech/api/authV2/open/device/{DEVICE_ID}/text"
+        # マニュアル指定の正しいエンドポイントURL
+        DOT_API_URL = f"https://dot.mindreset.tech/api/authV2/open/device/{DEVICE_ID}/text"
 
         # 天気コード（WMO）を絵文字にマッピング
         def get_weather_emoji(code):
@@ -53,42 +52,28 @@ jobs:
 
         # 気温に応じた衣類・服装情報の判定ロジック
         def get_clothing_advice(temp):
-            if temp >= 25.0:
-                return "半袖シャツ"
-            elif temp >= 20.0:
-                return "長袖シャツ"
-            elif temp >= 16.0:
-                return "カーディガン"
-            elif temp >= 12.0:
-                return "セーター"
-            elif temp >= 8.0:
-                return "トレンチコート"
-            elif temp >= 5.0:
-                return "冬物コート"
-            else:
-                return "ダウンコート"
+            if temp >= 25.0: return "半袖シャツ"
+            elif temp >= 20.0: return "長袖シャツ"
+            elif temp >= 16.0: return "カーディガン"
+            elif temp >= 12.0: return "セーター"
+            elif temp >= 8.0: return "トレンチコート"
+            elif temp >= 5.0: return "冬物コート"
+            else: return "ダウンコート"
 
         try:
-            # Open-Meteo APIから最新の気象データを取得
+            # 天気データの取得
             res = requests.get(OPEN_METEO_URL).json()
             hourly = res['hourly']
             
-            # 日本時間 (JST) の現在時刻を取得
             jst = timezone(timedelta(hours=9))
             now = datetime.now(jst)
             
-            # 取得データの時間軸をJSTに変換
             times = [datetime.fromisoformat(t).replace(tzinfo=jst) for t in hourly['time']]
-            
-            # 現在時刻に一番近いデータのインデックスを検索
             current_idx = min(range(len(times)), key=lambda i: abs(times[i] - now))
-            
-            # 「現在」「3時間後」「6時間後」のインデックスを指定
             target_indices = [current_idx, current_idx + 3, current_idx + 6]
             
             forecast_lines = []
             
-            # 3回ループして指定時間ごとのデータを成形
             for idx in target_indices:
                 if idx < len(times):
                     t = times[idx].strftime("%H:%M")
@@ -99,40 +84,40 @@ jobs:
                     emoji = get_weather_emoji(code)
                     clothing = get_clothing_advice(hourly['temperature_2m'][idx])
                     
-                    # 各項目の「左側の開始位置」を縦に揃えるためのフォーマット (右寄せ)
+                    # 【右寄せレイアウト設定】単位の末尾をタテにきれいに揃える
                     forecast_lines.append(f"{t} {emoji} {temp:>7} {prob:>5} {clothing}")
             
-            # 予報本文を改行で結合
-            weather_message = "\n".join(forecast_lines)
+            # 【重要】マニュアルの指定通り、文字列リテラル内での改行を保持するため「\\n」で結合
+            weather_message = "\\n".join(forecast_lines)
             
             print("--- 送信データ内容ログ ---")
             print(f"Title  : 札幌市")
-            print(f"Message:\n{weather_message}")
+            print(f"Message:\n{weather_message.replace('\\n', '\n')}")
             print("------------------------")
 
-            # 3. 新仕様（V2）に従ってヘッダーとパラメータを構築
+            # 2. マニュアルに従ったヘッダーとパラメータの構築
             headers = {
                 "Authorization": f"Bearer {API_KEY}",
                 "Content-Type": "application/json"
             }
             
-            # ドキュメントに指定されたリクエスト構造（title, message, refreshNowなど）
             payload = {
-                "title": "札幌市",
-                "message": weather_message,
-                "refreshNow": True  # デバイスへ即時更新をかけるフラグ
+                "refreshNow": True,     # 即時表示フラグ
+                "title": "札幌市",       # 画面上部のタイトル
+                "message": weather_message # 予報テキスト本文
             }
             
-            # 新しいURLへ送信
-            response = requests.post(QUOTE0_API_URL, headers=headers, json=payload)
+            # APIリクエストの送信
+            response = requests.post(DOT_API_URL, headers=headers, json=payload)
             
             if response.status_code in [200, 201]:
-                print("Quote/0 V2 APIの更新に成功しました！")
+                print(f"成功: {response.json().get('message')}")
             else:
-                print(f"Quote/0 V2 APIエラー: {response.status_code} - {response.text}")
+                print(f"エラー発生 (ステータスコード: {response.status_code})")
+                print(f"レスポンス内容: {response.text}")
                 exit(1)
 
         except Exception as e:
-            print(f"Error: {e}")
+            print(f"スクリプト実行エラー: {e}")
             exit(1)
         EOF
