@@ -99,8 +99,8 @@ jobs:
                     emoji = get_weather_emoji(code)
                     clothing = get_clothing_advice(hourly['temperature_2m'][idx])
                     
-                    # 各項目の「左側の開始位置」を縦に揃えるためのフォーマット (左寄せ)
-                    forecast_lines.append(f"{t} {emoji} {temp:<7} {prob:<5} {clothing}")
+                    # 各項目の「左側の開始位置」を縦に揃えるためのフォーマット (右寄せ)
+                    forecast_lines.append(f"{t} {emoji} {temp:>7} {prob:>5} {clothing}")
             
             # 予報本文を改行で結合
             weather_message = "\n".join(forecast_lines)
