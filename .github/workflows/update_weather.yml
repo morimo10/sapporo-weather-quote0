@@ -89,15 +89,17 @@ jobs:
             for idx in target_indices:
                 if idx < len(times):
                     t = times[idx].strftime("%H:%M")
-                    temp = hourly['temperature_2m'][idx]
-                    prob = hourly['precipitation_probability'][idx]
+                    temp = f"{hourly['temperature_2m'][idx]}°C"
+                    prob = f"{hourly['precipitation_probability'][idx]}%"
                     code = hourly['weather_code'][idx]
                     
                     emoji = get_weather_emoji(code)
-                    clothing = get_clothing_advice(temp)
+                    clothing = get_clothing_advice(hourly['temperature_2m'][idx])
                     
-                    # 予報行のフォーマット: 「時刻 絵文字 気温 降水確率 服装」
-                    lines.append(f"{t} {emoji} {temp}°C {prob}% {clothing}")
+                    # 【レイアウト調整の核心】
+                    # :>6 は「6文字分を確保して右寄せ」、:>4 は「4文字分を確保して右寄せ」という意味です。
+                    # これにより、文字数が変動しても後ろの「服装」の開始位置が揃います。
+                    lines.append(f"{t} {emoji} {temp:>6} {prob:>4} {clothing}")
             
             # 改行で結合して最終テキストを作成
             weather_text = "\n".join(lines)
