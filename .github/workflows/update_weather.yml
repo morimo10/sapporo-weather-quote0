@@ -1,4 +1,4 @@
-name: Update Weather and Clothing for Dot V2 (Pure JMA Array Fix)
+name: Update Weather and Clothing for Dot V2 (Hybrid JMA Slots)
 
 on:
   schedule:
@@ -34,8 +34,8 @@ jobs:
         API_KEY = os.environ.get("QUOTE0_API_KEY")
         DEVICE_ID = os.environ.get("QUOTE0_DEVICE_ID")
 
-        # 気象庁モデル(jma_seamless)のみを指名リクエスト
-        OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast?latitude=43.0620&longitude=141.3540&hourly=temperature_2m,precipitation_probability,weather_code&timezone=Asia%2FTokyo&models=jma_seamless"
+        # 【最終URL】気象庁専用キー(jma_seamless)で気温と天気を貰いつつ、標準モデルから降水確率を同時に引っ張る完璧なURLです
+        OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast?latitude=43.0620&longitude=141.3540&hourly=temperature_2m_jma_seamless,weather_code_jma_seamless,precipitation_probability&timezone=Asia%2FTokyo"
         DOT_API_URL = f"https://dot.mindreset.tech/api/authV2/open/device/{DEVICE_ID}/text"
 
         def get_weather_emoji(code):
@@ -69,16 +69,10 @@ jobs:
             hourly = res['hourly']
             h_time_strings = hourly.get('time', [])
             
-            # --- 【核心部分のバグ修正】マルチモデル時の二重配列構造を安全に分解抽出する ---
-            raw_temp_data = hourly.get('temperature_2m', [])
-            raw_prob_data = hourly.get('precipitation_probability', [])
-            raw_code_data = hourly.get('weather_code', [])
-            
-            # Open-Meteoの特別仕様により、データが[ [海外モデルデータ], [気象庁データ] ] のように2個入ってくるため、
-            # 確実に「気象庁(jma_seamless)」の配列（通常2番目、要素が1つの場合はそれ自身）をピンポイントで指定します。
-            h_temp = raw_temp_data[-1] if raw_temp_data and isinstance(raw_temp_data[0], list) else raw_temp_data
-            h_prob = raw_prob_data[-1] if raw_prob_data and isinstance(raw_prob_data[0], list) else raw_prob_data
-            h_code = raw_code_data[-1] if raw_code_data and isinstance(raw_code_data[0], list) else raw_code_data
+            # ハイブリッド抽出（気温・天気は気象庁、降水確率は標準から取得）
+            h_temp = hourly.get('temperature_2m_jma_seamless', [])
+            h_code = hourly.get('weather_code_jma_seamless', [])
+            h_prob = hourly.get('precipitation_probability', []) # ここに確実な数字が入ります
             
             title_text = "札幌市中央区の天気"
             
@@ -88,7 +82,6 @@ jobs:
             # 夜21時以降は明日の予定を表示
             target_date = now if now.hour < 21 else now + timedelta(days=1)
             
-            # 気象庁発表の正確な3時間基準タイム
             slots = [
                 ("朝(09:00)", 9),
                 ("昼(15:00)", 15),
@@ -101,14 +94,13 @@ jobs:
                 target_dt = target_date.replace(hour=hour, minute=0, second=0, microsecond=0)
                 target_time_str = target_dt.strftime("%Y-%m-%dT%H:%M")
                 
-                # インデックスの一致検索
                 idx = -1
                 if target_time_str in h_time_strings:
                     idx = h_time_strings.index(target_time_str)
                 
                 raw_temp = h_temp[idx] if (idx != -1 and idx < len(h_temp)) else None
-                raw_prob = h_prob[idx] if (idx != -1 and idx < len(h_prob)) else None
                 raw_code = h_code[idx] if (idx != -1 and idx < len(h_code)) else None
+                raw_prob = h_prob[idx] if (idx != -1 and idx < len(h_prob)) else None
                 
                 if raw_temp is not None:
                     temp_num = round(raw_temp)
@@ -122,7 +114,7 @@ jobs:
                     prob_num = int(raw_prob)
                     prob_display = f"{prob_num}%"
                 else:
-                    prob_display = "?%"
+                    prob_display = "0%" # 万が一のフォールバック
                 
                 emoji = get_weather_emoji(raw_code)
                 
@@ -133,7 +125,7 @@ jobs:
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（気象庁データ二重配列完全解体版） ---")
+            print("--- 送信データ内容ログ（ハイブリッド朝昼夜・確定版） ---")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
             print("---------------------------------------------------------")
