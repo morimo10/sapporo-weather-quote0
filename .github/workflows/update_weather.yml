@@ -1,4 +1,4 @@
-name: Update Weather and Clothing for Dot V2 (Pure JMA Final Layout)
+name: Update Weather and Clothing for Dot V2 (Pure JMA Commute Layout)
 
 on:
   schedule:
@@ -70,7 +70,7 @@ jobs:
             daily = res['daily']
             h_time_strings = hourly.get('time', [])
             
-            # 気象庁のデータのみを正確に抽出 (マルチモデルによるキー名置換に対応)
+            # 気象庁のデータのみを正確に抽出
             h_temp = hourly.get('temperature_2m_jma_seamless', hourly.get('temperature_2m', []))
             h_code = hourly.get('weather_code_jma_seamless', hourly.get('weather_code', []))
             d_prob = daily.get('precipitation_probability_max_jma_seamless', daily.get('precipitation_probability_max', []))
@@ -80,7 +80,7 @@ jobs:
             jst = timezone(timedelta(hours=9))
             now = datetime.now(jst)
             
-            # 夜21時以降は明日の予報を表示
+            # 【最適化】夜21時以降は「明日」の予報に切り替え
             is_tomorrow = now.hour >= 21
             target_date = now if not is_tomorrow else now + timedelta(days=1)
             day_idx = 1 if is_tomorrow else 0
@@ -89,14 +89,14 @@ jobs:
             prob_val = d_prob[day_idx] if d_prob and day_idx < len(d_prob) else None
             prob_str = f"{int(prob_val)}%" if prob_val is not None else "0%"
             
-            # 1行目にその日の最大降水確率を表示
             label_head = "明日の最大降水確率" if is_tomorrow else "今日の最大降水確率"
             forecast_lines = [f"{label_head}：{prob_str}"]
             
+            # 【変更点】お出かけ・通勤に特化した「6時・12時・18時」に変更しました
             slots = [
-                ("朝(09:00)", 9),
-                ("昼(15:00)", 15),
-                ("夜(21:00)", 21)
+                ("朝(06:00)", 6),
+                ("昼(12:00)", 12),
+                ("夜(18:00)", 18)
             ]
             
             for label, hour in slots:
@@ -125,7 +125,7 @@ jobs:
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（気象庁公式・完全日本仕様版） ---")
+            print("--- 送信データ内容ログ（通勤・お出かけ特化版） ---")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
             print("---------------------------------------------------------")
