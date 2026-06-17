@@ -1,4 +1,4 @@
-name: Update Weather and Clothing for Dot V2 (Pure JMA Ultra Compact)
+name: Update Weather and Clothing for Dot V2 (Pure JMA Minimalist Message)
 
 on:
   schedule:
@@ -75,6 +75,7 @@ jobs:
             jst = timezone(timedelta(hours=9))
             now = datetime.now(jst)
             
+            # 夜21時以降は「明日」のデータへシフト
             is_tomorrow = now.hour >= 21
             day_idx = 1 if is_tomorrow else 0
             label_head = "明日" if is_tomorrow else "今日"
@@ -85,7 +86,7 @@ jobs:
             
             weather_text = sapporo_weather['weathers'][day_idx]
             day_symbol = get_weather_symbol(weather_text)
-            title_text = f"札幌市中央区の天気: {day_symbol}"
+            title_text = f"札幌市中央区の{label_head}: {day_symbol}"
             
             # --- 2. 降水確率の取得 ---
             prob_time_series = area_forecast['timeSeries'][1]
@@ -132,9 +133,9 @@ jobs:
             temp_12 = t_max_num - 2
             temp_18 = t_max_num - 4
             
-            # 【文字数スリム化対応】「朝(06:00)」などを「06:00」へ完全統一
+            # 【要望対応】「今日（明日）の」を完全削除して「最大降水確率：」から開始
             forecast_lines = [
-                f"{label_head}の最大降水確率：{prob_str}{umbrella_mark}",
+                f"最大降水確率：{prob_str}{umbrella_mark}",
                 f"最低: {tmin_val}°C  最高: {tmax_val}°C",
                 f"06:00 {day_symbol}  {temp_06}°C{get_clothing_advice(temp_06)}",
                 f"12:00 {day_symbol}  {temp_12}°C{get_clothing_advice(temp_12)}",
@@ -143,7 +144,7 @@ jobs:
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（時間表記スリム化版） ---")
+            print("--- 送信データ内容ログ（日付ラベル削除版） ---")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
             print("---------------------------------------------------------")
