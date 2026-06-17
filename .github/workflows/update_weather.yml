@@ -1,4 +1,4 @@
-name: Update Weather and Clothing for Dot V2
+name: Update Weather and Clothing for Dot V2 (JMA-MSM)
 
 on:
   schedule:
@@ -35,8 +35,8 @@ jobs:
         API_KEY = os.environ.get("QUOTE0_API_KEY")
         DEVICE_ID = os.environ.get("QUOTE0_DEVICE_ID")
 
-        # 1. 札幌市中央区の座標（Open-Meteo API）
-        OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast?latitude=43.0553&longitude=141.3409&hourly=temperature_2m,precipitation_probability,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo"
+        # 1. 札幌市中央区の座標 ＋ 気象庁MSMモデル（models=jma_msm）を強制指定
+        OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast?latitude=43.0553&longitude=141.3409&hourly=temperature_2m,precipitation_probability,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo&models=jma_msm"
         
         # Dot. APIエンドポイントURL
         DOT_API_URL = f"https://dot.mindreset.tech/api/authV2/open/device/{DEVICE_ID}/text"
@@ -66,6 +66,7 @@ jobs:
             response_weather = requests.get(OPEN_METEO_URL)
             res = response_weather.json()
             
+            # APIエラーチェック（jma_msm指定時は、指定モデルのキー内にデータが入るため柔軟に取得します）
             if 'hourly' not in res or 'daily' not in res:
                 print(f"Open-Meteo APIエラーレスポンス: {res}")
                 exit(1)
@@ -77,7 +78,7 @@ jobs:
             max_temp_today = round(daily['temperature_2m_max'][0])
             min_temp_today = round(daily['temperature_2m_min'][0])
             
-            # 【文字切れ対策：幅に収まるよう「XX℃〜XX℃」形式に短縮】
+            # タイトル形式（短縮版）
             title_text = f"札幌市中央区 {max_temp_today}℃〜{min_temp_today}℃"
             
             jst = timezone(timedelta(hours=9))
@@ -85,6 +86,8 @@ jobs:
             
             times = [datetime.fromisoformat(t).replace(tzinfo=jst) for t in hourly['time']]
             current_idx = min(range(len(times)), key=lambda i: abs(times[i] - now))
+            
+            # 3時間ごと（現在、3時間後、6時間後）のインデックスを指定
             target_indices = [current_idx, current_idx + 3, current_idx + 6]
             
             forecast_lines = []
@@ -114,10 +117,10 @@ jobs:
             # 通常の改行文字で結合
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ ---")
+            print("--- 送信データ内容ログ（気象庁MSMモデル） ---")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
-            print("------------------------")
+            print("------------------------------------------")
 
             # 2. Dot. APIへ送信するヘッダーとパラメータ
             headers = {
@@ -127,8 +130,8 @@ jobs:
             
             payload = {
                 "refreshNow": True,
-                "title": title_text,       # 短縮したタイトル
-                "message": weather_message # 予報テキスト本文
+                "title": title_text,
+                "message": weather_message
             }
             
             response = requests.post(DOT_API_URL, headers=headers, json=payload)
