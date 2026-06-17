@@ -1,4 +1,4 @@
-name: Update Weather and Clothing for Dot V2 (Yahoo Weather)
+name: Update Weather and Clothing for Dot V2 (Yahoo Weather Fixed)
 
 on:
   schedule:
@@ -18,7 +18,6 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        # Yahoo!天気解析用に beautifulsoup4 を追加
         pip install requests beautifulsoup4
 
     - name: Generate and Push to Dot API
@@ -37,13 +36,12 @@ jobs:
         API_KEY = os.environ.get("QUOTE0_API_KEY")
         DEVICE_ID = os.environ.get("QUOTE0_DEVICE_ID")
 
-        # 1. Yahoo!天気：札幌市中央区（大通・すすきの周辺地域）のピンポイント予報ページURL
+        # 1. Yahoo!天気：札幌市中央区のピンポイント予報ページURL
         YAHOO_WEATHER_URL = "https://weather.yahoo.co.jp/weather/jp/1b/1400/1101.html"
         
         # Dot. APIエンドポイントURL
         DOT_API_URL = f"https://dot.mindreset.tech/api/authV2/open/device/{DEVICE_ID}/text"
 
-        # Yahoo!天気の文字表現から絵文字へマッピング
         def get_weather_emoji(text):
             if "晴" in text: return "☀️"
             elif "曇" in text or "くもり" in text: return "⛅"
@@ -53,7 +51,6 @@ jobs:
             elif "霧" in text: return "🌫️"
             return "⛅"
 
-        # 気温に応じた服装アドバイス
         def get_clothing_advice(temp):
             if temp >= 25: return "半袖シャツ"
             elif temp >= 20: return "長袖シャツ"
@@ -64,7 +61,7 @@ jobs:
             else: return "ダウンコート"
 
         try:
-            # Yahoo!天気のHTMLを取得（クローリング防止対策としてユーザーエージェントを設定）
+            # ユーザーエージェントを設定してリクエスト
             headers_browser = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
             response_html = requests.get(YAHOO_WEATHER_URL, headers=headers_browser)
             response_html.encoding = 'utf-8'
@@ -79,32 +76,54 @@ jobs:
             high_box = parent_div.find("em", class_="high")
             low_box = parent_div.find("em", class_="low")
             
-            max_temp = int(high_box.text) if high_box else 20
-            min_temp = int(low_box.text) if low_box else 10
+            max_temp = int(high_box.text) if high_box and high_box.text.isdigit() else 20
+            min_temp = int(low_box.text) if low_box and low_box.text.isdigit() else 10
             
-            # タイトル（短縮版）
             title_text = f"札幌市中央区 {max_temp}℃〜{min_temp}℃"
             
-            # --- 3時間ごと予報テーブルの解析 ---
-            # ページ内の「3時間ごとの天気」テーブルを取得
+            # --- 3時間ごと予報テーブルの頑健な解析 ---
             weather_table = soup.find("table", class_="yjw_table2")
             if not weather_table:
-                # クラス名が異なる場合のフォールバック
                 weather_table = soup.find("div", id="threeHourTimeline").find("table")
                 
             rows = weather_table.find_all("tr")
             
-            # 各行のデータをリスト化
-            hours_data = [td.text.strip().replace("\n", "") for td in rows[0].find_all("td")][1:]
-            weather_data = [td.text.strip() for td in rows[1].find_all("td")][1:]
-            temp_data = [int(td.text.strip()) for td in rows[2].find_all("td")][1:]
-            prob_data = [td.text.strip() for td in rows[3].find_all("td")][1:]
+            # 【バグ修正箇所】
+            # 先頭の項目名セル（例：「時間」「天気」「気温（℃）」「降水確率（％）」）を確実に除外
+            # td.textの中に数字、もしくは「%」以外の文字しか含まれていないノイズ行をガードします
+            hours_data = []
+            weather_data = []
+            temp_data = []
+            prob_data = []
+
+            # 各行から純粋な予測値（データセル）のみを抽出
+            for td in rows[0].find_all("td"):
+                text = td.text.strip().replace("\n", "")
+                if text and "時間" not in text:
+                    hours_data.append(text)
+
+            for td in rows[1].find_all("td"):
+                text = td.text.strip().replace("\n", "")
+                if text and "天気" not in text:
+                    weather_data.append(text)
+
+            for td in rows[2].find_all("td"):
+                text = td.text.strip().replace("\n", "")
+                if text and "気温" not in text:
+                    # 数字のみを抽出して整数変換
+                    cleaned_temp = "".join(filter(str.isdigit, text))
+                    if cleaned_temp:
+                        temp_data.append(int(cleaned_temp))
+
+            for td in rows[3].find_all("td"):
+                text = td.text.strip().replace("\n", "")
+                if text and "降水" not in text:
+                    prob_data.append(text)
             
-            # 現在時刻を基準に、表示するインデックス（現在・3時間後・6時間後）を算出
+            # 現在のインデックスを計算
             jst = timezone(timedelta(hours=9))
             current_hour = datetime.now(jst).hour
             
-            # Yahoo天気は 00:00 から 3時間刻み (0, 3, 6, 9, 12, 15, 18, 21)
             time_slots = [0, 3, 6, 9, 12, 15, 18, 21]
             closest_slot = min(time_slots, key=lambda x: abs(x - current_hour))
             current_idx = time_slots.index(closest_slot)
@@ -114,12 +133,14 @@ jobs:
             forecast_lines = []
             
             for idx in target_indices:
-                # 本日のデータ配列の範囲内に収まっている場合のみ処理
-                if idx < len(hours_data):
-                    time_str = hours_data[idx].zfill(2) + ":00" # 例: "9" -> "09:00"
+                if idx < len(hours_data) and idx < len(temp_data):
+                    # 「9」などの1桁の時間を「09:00」形式に綺麗に変換
+                    raw_hour = "".join(filter(str.isdigit, hours_data[idx]))
+                    time_str = raw_hour.zfill(2) + ":00"
+                    
                     weather_text = weather_data[idx]
                     temp_val = temp_data[idx]
-                    prob_val = prob_data[idx] # 例: "10%" または "0"
+                    prob_val = prob_data[idx]
                     
                     if "%" not in prob_val:
                         prob_val = f"{prob_val}%"
@@ -127,20 +148,18 @@ jobs:
                     emoji = get_weather_emoji(weather_text)
                     clothing = get_clothing_advice(temp_val)
                     
-                    # 各数値を右寄せに成形
                     temp_str = f"{temp_val}°C"
                     temp_aligned = temp_str.rjust(5)
                     prob_aligned = prob_val.rjust(4)
                     
                     forecast_lines.append(f"{time_str} {emoji} {temp_aligned} {prob_aligned} {clothing}")
             
-            # 改行コードで結合
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（Yahoo!天気同期） ---")
+            print("--- 送信データ内容ログ（Yahoo!天気・エラー対策版） ---")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
-            print("------------------------------------------")
+            print("--------------------------------------------------")
 
             # 2. Dot. APIへ送信するヘッダーとパラメータ
             headers = {
