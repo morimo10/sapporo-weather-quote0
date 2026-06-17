@@ -1,4 +1,4 @@
-name: Update Weather and Clothing for Dot V2 (Perfect Title & Spacing)
+name: Update Weather and Clothing for Dot V2 (Fix Probability Backup)
 
 on:
   schedule:
@@ -34,6 +34,7 @@ jobs:
         API_KEY = os.environ.get("QUOTE0_API_KEY")
         DEVICE_ID = os.environ.get("QUOTE0_DEVICE_ID")
 
+        # 気象庁モデル(jma_seamless)に加え、バックアップ用に通常のグローバル予報データも同時に取得
         OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast?latitude=43.0620&longitude=141.3540&hourly=temperature_2m,precipitation_probability,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo&models=jma_seamless"
         DOT_API_URL = f"https://dot.mindreset.tech/api/authV2/open/device/{DEVICE_ID}/text"
 
@@ -47,16 +48,15 @@ jobs:
             elif code in [95, 96, 99]: return "⚡"
             return "⛅"
 
-        # 【確定】文字列の先頭に直接全角スペースを埋め込んで絶対に削らせない
         def get_clothing_advice(temp):
-            if temp is None: return "　調整着"
-            if temp >= 30.0: return "　Ｔシャツ"
-            elif temp >= 25.0: return "　半袖"
-            elif temp >= 20.0: return "　長袖"
-            elif temp >= 15.0: return "　セーター"
-            elif temp >= 10.0: return "　ジャケット"
-            elif temp >= 5.0: return "　コート"
-            else: return "　ダウン"
+            if temp is None: return " 調整着"
+            if temp >= 30.0: return " Tシャツ"
+            elif temp >= 25.0: return " 半袖"
+            elif temp >= 20.0: return " 長袖"
+            elif temp >= 15.0: return " セーター"
+            elif temp >= 10.0: return " ジャケット"
+            elif temp >= 5.0: return " コート"
+            else: return " ダウン"
 
         try:
             response_weather = requests.get(OPEN_METEO_URL)
@@ -69,8 +69,10 @@ jobs:
             hourly = res['hourly']
             daily = res['daily']
             
+            # 各データの取得（気象庁モデル優先、なければ標準モデル）
             h_temp = hourly.get('temperature_2m_jma_seamless', hourly.get('temperature_2m', []))
-            h_prob = hourly.get('precipitation_probability_jma_seamless', hourly.get('precipitation_probability', []))
+            h_prob_jma = hourly.get('precipitation_probability_jma_seamless')
+            h_prob_std = hourly.get('precipitation_probability', [])
             h_code = hourly.get('weather_code_jma_seamless', hourly.get('weather_code', []))
             
             d_max = daily.get('temperature_2m_max_jma_seamless', daily.get('temperature_2m_max', []))
@@ -82,7 +84,6 @@ jobs:
             max_str = f"{round(max_val)}" if max_val is not None else "?"
             min_str = f"{round(min_val)}" if min_val is not None else "?"
             
-            # 【修正】地域名は残し、真ん中の「℃」を取り除いて「xx〜xx℃」の形に
             title_text = f"札幌市中央区 {max_str}〜{min_str}℃"
             
             jst = timezone(timedelta(hours=9))
@@ -108,9 +109,18 @@ jobs:
             
             for idx, t_str in target_indices:
                 raw_temp = h_temp[idx] if idx < len(h_temp) else None
-                raw_prob = h_prob[idx] if idx < len(h_prob) else None
                 raw_code = h_code[idx] if idx < len(h_code) else None
                 
+                # --- 【修正】降水確率のハイブリッド抽出 ---
+                # 気象庁モデルの配列から探し、無効（None）または配列長不足なら標準モデルから取得
+                raw_prob = None
+                if h_prob_jma and idx < len(h_prob_jma):
+                    raw_prob = h_prob_jma[idx]
+                
+                if raw_prob is None and idx < len(h_prob_std):
+                    raw_prob = h_prob_std[idx]
+                
+                # 気温と服装のパース
                 if raw_temp is not None:
                     temp_num = round(raw_temp)
                     temp_display = f"{temp_num}°C"
@@ -119,6 +129,7 @@ jobs:
                     temp_display = "?°C"
                     clothing = get_clothing_advice(None)
                 
+                # 降水確率のテキスト化
                 if raw_prob is not None:
                     prob_num = int(raw_prob)
                     prob_display = f"{prob_num}%"
@@ -134,7 +145,7 @@ jobs:
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（完璧タイトル＆スペース直入れ版） ---")
+            print("--- 送信データ内容ログ（降水確率バックアップ搭載版） ---")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
             print("---------------------------------------------------------")
