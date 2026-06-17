@@ -1,4 +1,4 @@
-name: Update Weather and Clothing for Dot V2 (Pure JMA Daytime Active Version)
+name: Update Weather and Clothing for Dot V2 (Pure JMA Robust Morning Fix)
 
 on:
   schedule:
@@ -107,29 +107,42 @@ jobs:
             prob_str = f"{max_prob}%"
             umbrella_mark = " ☔" if max_prob >= 50 else (" ☂" if max_prob >= 30 else "")
             
-            # --- 3. 最高・最低気温の取得 ---
+            # --- 3. 最高・最低気温の取得（早朝の空文字トラップ完全ガード） ---
             temp_time_series = area_forecast['timeSeries'][2]
             temp_areas = temp_time_series['areas']
             sapporo_temp = next((a for a in temp_areas if a['area']['code'] == '016010'), temp_areas[0])
             
             temps = sapporo_temp['temps']
+            
+            # 生データを抽出し、文字型として安全に確保
+            tmin_raw = ""
+            tmax_raw = ""
             if len(temps) >= 4:
-                tmin_val = temps[2] if is_tomorrow else temps[0]
-                tmax_val = temps[3] if is_tomorrow else temps[1]
+                tmin_raw = temps[2] if is_tomorrow else temps[0]
+                tmax_raw = temps[3] if is_tomorrow else temps[1]
             else:
-                tmin_val = temps[0] if len(temps) > 0 else "?"
-                tmax_val = temps[1] if len(temps) > 1 else "?"
+                tmin_raw = temps[0] if len(temps) > 0 else ""
+                tmax_raw = temps[1] if len(temps) > 1 else ""
 
-            if not is_tomorrow and (tmin_val == tmax_val or int(tmin_val) > int(tmax_val)):
+            # 気象庁の仕様: 早朝（5時〜11時頃）は今日の最低気温が「空文字 ''」になるため週間予報から補完
+            if not is_tomorrow and (not tmin_raw or tmin_raw == tmax_raw):
                 try:
-                    tmin_val = res[1]['timeSeries'][1]['areas'][0]['tempsMin'][0]
+                    tmin_raw = res[1]['timeSeries'][1]['areas'][0]['tempsMin'][0]
                 except:
-                    tmin_val = "14"
+                    tmin_raw = "14" # 最終フォールバック
+            
+            # もし最高気温も空文字ならフォールバック
+            if not tmax_raw:
+                tmax_raw = "25"
+
+            # 完全に中身があることを保証してから数値変換（これでエラーを完全回避）
+            t_min_num = int(tmin_raw) if tmin_raw.strip() else 14
+            t_max_num = int(tmax_raw) if tmax_raw.strip() else 25
+            
+            tmin_val = str(t_min_num)
+            tmax_val = str(t_max_num)
             
             # --- 4. 時間ごとの気温算出 ---
-            t_max_num = int(tmax_val) if tmax_val != "?" else 25
-            t_min_num = int(tmin_val) if tmin_val != "?" else 14
-            
             temp_06 = t_min_num + 1
             temp_12 = t_max_num - 2
             temp_18 = t_max_num - 4
@@ -144,7 +157,7 @@ jobs:
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（06:00〜22:00稼動版） ---")
+            print("--- 送信データ内容ログ（朝方エラー対応版） ---")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
             print("---------------------------------------------------------")
