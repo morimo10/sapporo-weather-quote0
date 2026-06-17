@@ -1,4 +1,4 @@
-name: Update Weather and Clothing for Dot V2 (Strict Time Match)
+name: Update Weather and Clothing for Dot V2 (Pure JMA Fix)
 
 on:
   schedule:
@@ -34,7 +34,8 @@ jobs:
         API_KEY = os.environ.get("QUOTE0_API_KEY")
         DEVICE_ID = os.environ.get("QUOTE0_DEVICE_ID")
 
-        OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast?latitude=43.0620&longitude=141.3540&hourly=temperature_2m,precipitation_probability,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo"
+        # 【URL修正】気象庁モデル(jma_seamless)と、夜間補完用の標準モデルを確実に両方リクエスト
+        OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast?latitude=43.0620&longitude=141.3540&hourly=temperature_2m,precipitation_probability,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo&models=jma_seamless"
         DOT_API_URL = f"https://dot.mindreset.tech/api/authV2/open/device/{DEVICE_ID}/text"
 
         def get_weather_emoji(code):
@@ -68,13 +69,19 @@ jobs:
             hourly = res['hourly']
             daily = res['daily']
             
-            h_time_strings = hourly.get('time', []) # "2026-06-17T16:00" のような文字列の配列
-            h_temp = hourly.get('temperature_2m', [])
-            h_prob = hourly.get('precipitation_probability', [])
-            h_code = hourly.get('weather_code', [])
+            h_time_strings = hourly.get('time', [])
             
-            d_max = daily.get('temperature_2m_max', [])
-            d_min = daily.get('temperature_2m_min', [])
+            # --- 【重要修正】気象庁(jma_seamless)専用のデータキーから最優先でデータを抽出 ---
+            # これにより、海外モデルの51%という誤った数値の混入を完全にシャットアウトします
+            h_temp_jma = hourly.get('temperature_2m_jma_seamless', hourly.get('temperature_2m', []))
+            h_prob_jma = hourly.get('precipitation_probability_jma_seamless', [])
+            h_code_jma = hourly.get('weather_code_jma_seamless', hourly.get('weather_code', []))
+            
+            # 夜間データ切れの際のバックアップ用標準データ
+            h_prob_std = hourly.get('precipitation_probability', [])
+            
+            d_max = daily.get('temperature_2m_max_jma_seamless', daily.get('temperature_2m_max', []))
+            d_min = daily.get('temperature_2m_min_jma_seamless', daily.get('temperature_2m_min', []))
             
             max_val = d_max[0] if d_max and len(d_max) > 0 else None
             min_val = d_min[0] if d_min and len(d_min) > 0 else None
@@ -87,40 +94,37 @@ jobs:
             jst = timezone(timedelta(hours=9))
             now = datetime.now(jst)
             
-            # 【修正】起点となる時間の決定ロジックをシンプルに
             base_hour = now.hour if now.hour % 2 == 0 else now.hour - 1
             start_time = now.replace(hour=base_hour, minute=0, second=0, microsecond=0)
-            
-            # もし起点時間が現在より1時間半以上古ければ、次の偶数時間にする
             if now - start_time > timedelta(hours=1, minutes=30):
                 start_time += timedelta(hours=2)
             
             forecast_lines = []
             
-            # 5行（2時間刻み）の予報を生成
             for i in range(5):
                 target_dt = start_time + timedelta(hours=i * 2)
-                
-                # APIが探しやすい形式のフォーマット文字列を作る (例: "2026-06-17T16:00")
                 target_time_str = target_dt.strftime("%Y-%m-%dT%H:%M")
                 display_time_str = target_dt.strftime("%H:%M")
                 
-                # --- 【超重要修正】指定した日時の文字列と完全に一致するインデックスを検索 ---
                 idx = -1
                 if target_time_str in h_time_strings:
                     idx = h_time_strings.index(target_time_str)
-                
-                # 万が一完全一致が見つからない場合のみ、一番近いところを検索（バックアップ）
                 if idx == -1:
                     times_parsed = [datetime.fromisoformat(t).replace(tzinfo=jst) for t in h_time_strings]
                     idx = min(range(len(times_parsed)), key=lambda k: abs(times_parsed[k] - target_dt.replace(tzinfo=jst)))
                 
-                # データの抽出
-                raw_temp = h_temp[idx] if idx < len(h_temp) else None
-                raw_prob = h_prob[idx] if idx < len(h_prob) else None
-                raw_code = h_code[idx] if idx < len(h_code) else None
+                # 気象庁の純粋なデータ配列からピンポイント抽出
+                raw_temp = h_temp_jma[idx] if idx < len(h_temp_jma) else None
+                raw_code = h_code_jma[idx] if idx < len(h_code_jma) else None
                 
-                # 気温・服装
+                # 降水確率は気象庁の値を最優先し、夜間でNoneの場合のみ標準モデルで補完
+                raw_prob = None
+                if h_prob_jma and idx < len(h_prob_jma):
+                    raw_prob = h_prob_jma[idx]
+                if raw_prob is None and idx < len(h_prob_std):
+                    raw_prob = h_prob_std[idx]
+                
+                # 気温と服装
                 if raw_temp is not None:
                     temp_num = round(raw_temp)
                     temp_display = f"{temp_num}°C"
@@ -141,12 +145,11 @@ jobs:
                 temp_aligned = temp_display.rjust(5)
                 prob_aligned = prob_display.rjust(4)
                 
-                # 完全に一致した時間のデータだけで1行を作る
                 forecast_lines.append(f"{display_time_str} {emoji} {temp_aligned} {prob_aligned}{clothing}")
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（インデックス完全一致版） ---")
+            print("--- 送信データ内容ログ（気象庁モデル最優先・完全固定版） ---")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
             print("---------------------------------------------------------")
