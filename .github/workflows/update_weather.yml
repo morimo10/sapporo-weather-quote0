@@ -1,4 +1,4 @@
-name: Update Weather and Clothing for Dot V2 (Monospace Style)
+name: Update Weather and Clothing for Dot V2 (Force Spacing)
 
 on:
   schedule:
@@ -119,18 +119,27 @@ jobs:
                 emoji = get_weather_emoji(code_val)
                 clothing = get_clothing_advice(temp_val)
                 
-                # 等幅フォントの恩恵を最大化するため、幅を美しく揃える
-                temp_str = f"{temp_val}°C"
+                # --- 【修正】半角スペースのトリミング対策 ---
+                # 1桁・2桁の降水確率の時にガタつかないよう、手動で厳密にパディング
                 prob_str = f"{prob_val}%"
+                if len(prob_str) == 2:    # 「0%」など2文字のとき
+                    prob_aligned = f" {prob_str}"
+                else:                     # 「10%」など3文字のとき
+                    prob_aligned = prob_str
                 
-                temp_aligned = temp_str.rjust(4)
-                prob_aligned = prob_str.rjust(3)
+                # 気温も同様に調整
+                temp_str = f"{temp_val}°C"
+                if len(temp_str) == 4:    # 「9°C」など4文字のとき
+                    temp_aligned = f" {temp_str}"
+                else:                     # 「24°C」など5文字のとき
+                    temp_aligned = temp_str
                 
-                forecast_lines.append(f"{t_str} {emoji} {temp_aligned} {prob_aligned}  {clothing}")
+                # 服装の前に、デバイスシステムに絶対に削除されない「全角スペース」を確実に注入
+                forecast_lines.append(f"{t_str} {emoji} {temp_aligned} {prob_aligned}　{clothing}")
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（等幅フォント指定版） ---")
+            print("--- 送信データ内容ログ（全角スペース強制適用版） ---")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
             print("---------------------------------------------")
@@ -139,7 +148,6 @@ jobs:
                 "Authorization": f"Bearer {API_KEY}",
                 "Content-Type": "application/json"
             }
-            # 【修正】payloadに style を追加して、タイトルとメッセージ両方を等幅フォントに強制指定
             payload = {
                 "refreshNow": True,
                 "title": title_text,
