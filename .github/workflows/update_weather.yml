@@ -1,4 +1,4 @@
-name: Update Weather and Clothing for Dot V2 (Yahoo Precise)
+name: Update Weather and Clothing for Dot V2 (Yahoo Fixed Final)
 
 on:
   schedule:
@@ -63,24 +63,20 @@ jobs:
             response_html.encoding = 'utf-8'
             soup = BeautifulSoup(response_html.text, "html.parser")
             
-            # --- 【修正】最高気温・最低気温を今日のメインパネルから正確に取得 ---
+            # --- 最高気温・最低気温の抽出 ---
             weather_box = soup.find("div", id="presentation") or soup.find("div", class_="forecastCity")
             high_box = weather_box.find("em", class_="high") if weather_box else None
             low_box = weather_box.find("em", class_="low") if weather_box else None
             
-            # メインパネルから取れなかった場合のフォールバック
-            if not high_box:
-                high_box = soup.find("em", class_="high")
-            if not low_box:
-                low_box = soup.find("em", class_="low")
+            if not high_box: high_box = soup.find("em", class_="high")
+            if not low_box: low_box = soup.find("em", class_="low")
                 
             max_temp = int(high_box.text) if high_box and high_box.text.replace("-","").isdigit() else 24
             min_temp = int(low_box.text) if low_box and low_box.text.replace("-","").isdigit() else 14
             
             title_text = f"札幌市中央区 {max_temp}℃〜{min_temp}℃"
             
-            # --- 【超精密修正】3時間ごと予報テーブルをID指定で安全にスクレイピング ---
-            # 他のテーブル（前日の実況など）を絶対に混ぜないよう、3時間予報ブロックを特定
+            # --- 3時間ごと予報テーブルの解析 ---
             timeline_div = soup.find("div", id="threeHourTimeline") or soup.find("table", class_="yjw_table2").parent
             
             hours_data = []
@@ -88,18 +84,15 @@ jobs:
             temp_data = []
             prob_data = []
             
-            # 行ごとに、ヘッダー（最初のtd）を無視してデータセルのみを完全に分解して格納
             for tr in timeline_div.find_all("tr"):
                 first_td = tr.find("td")
-                if not first_td:
-                    continue
+                if not first_td: continue
                 header_text = first_td.text.strip()
-                tds = tr.find_all("td")[1:] # 先頭の見出し列を除外した、ピュアな8マス
+                tds = tr.find_all("td")[1:]
                 
                 if "時間" in header_text:
-                    hours_data = [td.text.strip() for td in tds]
+                    hours_data = [int("".join(filter(str.isdigit, td.text.strip()))) for td in tds if "".join(filter(str.isdigit, td.text.strip())).isdigit()]
                 elif "天気" in header_text:
-                    # 文字化け防止：imgのalt属性だけを100%抽出（余計な文字ノイズを完全遮断）
                     for td in tds:
                         img = td.find("img")
                         weather_data.append(img["alt"].strip() if img and img.has_attr("alt") else td.text.strip())
@@ -110,20 +103,24 @@ jobs:
                 elif "降水" in header_text:
                     prob_data = [td.text.strip() for td in tds]
 
-            # 現在の時刻スロットを特定
+            # --- 【修正】現在時刻から、表示すべき「最初のマスの位置」を自動検索 ---
             jst = timezone(timedelta(hours=9))
             current_hour = datetime.now(jst).hour
-            time_slots = [0, 3, 6, 9, 12, 15, 18, 21]
-            closest_slot = min(time_slots, key=lambda x: abs(x - current_hour))
-            current_idx = time_slots.index(closest_slot)
             
-            target_indices = [current_idx, current_idx + 1, current_idx + 2]
+            # Yahoo天気の残っている時間（例：[12, 15, 18, 21] など）から、今に一番近いものを探す
+            start_idx = 0
+            if hours_data:
+                # 現在時刻以上の時間、または最後のマスをベースにする
+                closest_hour = min(hours_data, key=lambda x: abs(x - current_hour))
+                start_idx = hours_data.index(closest_hour)
+            
+            # 見つけた位置から、3回分のデータを取得
+            target_indices = [start_idx, start_idx + 1, start_idx + 2]
             forecast_lines = []
             
             for idx in target_indices:
                 if idx < len(hours_data) and idx < len(temp_data) and idx < len(weather_data) and idx < len(prob_data):
-                    raw_hour = "".join(filter(str.isdigit, hours_data[idx]))
-                    time_str = raw_hour.zfill(2) + ":00"
+                    time_str = str(hours_data[idx]).zfill(2) + ":00"
                     
                     weather_text = weather_data[idx]
                     temp_val = temp_data[idx]
@@ -135,22 +132,22 @@ jobs:
                     emoji = get_weather_emoji(weather_text)
                     clothing = get_clothing_advice(temp_val)
                     
-                    # 完全に右寄せ幅を固定（気温5幅、確率4幅）
                     temp_str = f"{temp_val}°C"
                     temp_aligned = temp_str.rjust(5)
                     prob_aligned = prob_val.rjust(4)
                     
                     forecast_lines.append(f"{time_str} {emoji} {temp_aligned} {prob_aligned} {clothing}")
             
+            # 万が一夜遅すぎて翌日のデータがなく配列が足りない時だけのセーフティ
             if not forecast_lines:
-                forecast_lines.append("夜間のため本日の予報は終了しました")
+                forecast_lines.append("本日の予報は終了しました")
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（精密解析版） ---")
+            print("--- 送信データ内容ログ（時間変動対応版） ---")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
-            print("---------------------------------------")
+            print("------------------------------------------")
 
             headers = {
                 "Authorization": f"Bearer {API_KEY}",
