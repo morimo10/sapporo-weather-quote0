@@ -1,4 +1,4 @@
-name: Update Weather and Clothing for Dot V2 (Final Fixed)
+name: Update Weather and Clothing for Dot V2 (Strict Time Match)
 
 on:
   schedule:
@@ -34,8 +34,6 @@ jobs:
         API_KEY = os.environ.get("QUOTE0_API_KEY")
         DEVICE_ID = os.environ.get("QUOTE0_DEVICE_ID")
 
-        # 【超重要】JMA(気象庁)モデルを確実に引き出す、Open-Meteo公式推奨の最も安定したURLです。
-        # これによりキー名が変に書き換わるバグを根絶し、気温・降水確率ともに正常な生データを取得します。
         OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast?latitude=43.0620&longitude=141.3540&hourly=temperature_2m,precipitation_probability,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo"
         DOT_API_URL = f"https://dot.mindreset.tech/api/authV2/open/device/{DEVICE_ID}/text"
 
@@ -70,7 +68,7 @@ jobs:
             hourly = res['hourly']
             daily = res['daily']
             
-            # 標準仕様のクリーンなデータ抽出
+            h_time_strings = hourly.get('time', []) # "2026-06-17T16:00" のような文字列の配列
             h_temp = hourly.get('temperature_2m', [])
             h_prob = hourly.get('precipitation_probability', [])
             h_code = hourly.get('weather_code', [])
@@ -89,30 +87,40 @@ jobs:
             jst = timezone(timedelta(hours=9))
             now = datetime.now(jst)
             
-            times = [datetime.fromisoformat(t).replace(tzinfo=jst) for t in hourly.get('time', [])]
-            
+            # 【修正】起点となる時間の決定ロジックをシンプルに
             base_hour = now.hour if now.hour % 2 == 0 else now.hour - 1
-            if base_hour < 0: base_hour = 0
-            
             start_time = now.replace(hour=base_hour, minute=0, second=0, microsecond=0)
-            if start_time < now - timedelta(hours=1, minutes=30):
+            
+            # もし起点時間が現在より1時間半以上古ければ、次の偶数時間にする
+            if now - start_time > timedelta(hours=1, minutes=30):
                 start_time += timedelta(hours=2)
             
             forecast_lines = []
-            target_indices = []
             
+            # 5行（2時間刻み）の予報を生成
             for i in range(5):
-                loop_time = start_time + timedelta(hours=i * 2)
-                idx = min(range(len(times)), key=lambda k: abs(times[k] - loop_time))
-                if idx < len(times):
-                    target_indices.append((idx, loop_time.strftime("%H:%M")))
-            
-            for idx, t_str in target_indices:
+                target_dt = start_time + timedelta(hours=i * 2)
+                
+                # APIが探しやすい形式のフォーマット文字列を作る (例: "2026-06-17T16:00")
+                target_time_str = target_dt.strftime("%Y-%m-%dT%H:%M")
+                display_time_str = target_dt.strftime("%H:%M")
+                
+                # --- 【超重要修正】指定した日時の文字列と完全に一致するインデックスを検索 ---
+                idx = -1
+                if target_time_str in h_time_strings:
+                    idx = h_time_strings.index(target_time_str)
+                
+                # 万が一完全一致が見つからない場合のみ、一番近いところを検索（バックアップ）
+                if idx == -1:
+                    times_parsed = [datetime.fromisoformat(t).replace(tzinfo=jst) for t in h_time_strings]
+                    idx = min(range(len(times_parsed)), key=lambda k: abs(times_parsed[k] - target_dt.replace(tzinfo=jst)))
+                
+                # データの抽出
                 raw_temp = h_temp[idx] if idx < len(h_temp) else None
                 raw_prob = h_prob[idx] if idx < len(h_prob) else None
                 raw_code = h_code[idx] if idx < len(h_code) else None
                 
-                # 気温と服装のアジャスト
+                # 気温・服装
                 if raw_temp is not None:
                     temp_num = round(raw_temp)
                     temp_display = f"{temp_num}°C"
@@ -121,7 +129,7 @@ jobs:
                     temp_display = "?°C"
                     clothing = get_clothing_advice(None)
                 
-                # 降水確率のアジャスト
+                # 降水確率
                 if raw_prob is not None:
                     prob_num = int(raw_prob)
                     prob_display = f"{prob_num}%"
@@ -133,11 +141,12 @@ jobs:
                 temp_aligned = temp_display.rjust(5)
                 prob_aligned = prob_display.rjust(4)
                 
-                forecast_lines.append(f"{t_str} {emoji} {temp_aligned} {prob_aligned}{clothing}")
+                # 完全に一致した時間のデータだけで1行を作る
+                forecast_lines.append(f"{display_time_str} {emoji} {temp_aligned} {prob_aligned}{clothing}")
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（完全復活・最終安定版） ---")
+            print("--- 送信データ内容ログ（インデックス完全一致版） ---")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
             print("---------------------------------------------------------")
