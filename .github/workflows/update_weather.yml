@@ -1,4 +1,4 @@
-name: Update Weather and Clothing for Dot V2 (Pure JMA Legacy Emoji Fix)
+name: Update Weather and Clothing for Dot V2 (Pure JMA Ultra Compact)
 
 on:
   schedule:
@@ -38,12 +38,21 @@ jobs:
         JMA_FORECAST_URL = "https://www.jma.go.jp/bosai/forecast/data/forecast/016000.json"
         DOT_API_URL = f"https://dot.mindreset.tech/api/authV2/open/device/{DEVICE_ID}/text"
 
-        # 【超重要】あらゆるドットフォント・特殊環境で絶対に化けないクラシックな天気記号を採用
         def get_weather_symbol(text):
-            if "晴" in text and "雨" in text: return "☁"
-            elif "晴" in text and "曇" in text: return "☁"
-            elif "曇" in text and "雨" in text: return "☔"
-            elif "晴" in text: return "☀"
+            if not text: return "☁"
+            
+            if "晴" in text and "雨" in text:
+                return "☀→☔" if text.find("晴") < text.find("雨") else "☔→☀"
+            elif "晴" in text and "曇" in text:
+                return "☀→☁" if text.find("晴") < text.find("曇") else "☁→☀"
+            elif "曇" in text and "雨" in text:
+                return "☁→☔" if text.find("曇") < text.find("雨") else "☔→☁"
+            elif "曇" in text and "雪" in text:
+                return "☁→☃" if text.find("曇") < text.find("雪") else "☃→☁"
+            elif "雨" in text and "雪" in text:
+                return "☔→☃" if text.find("雨") < text.find("雪") else "☃→☔"
+            
+            if "晴" in text: return "☀"
             elif "曇" in text: return "☁"
             elif "雨" in text: return "☔"
             elif "雪" in text: return "☃"
@@ -94,8 +103,6 @@ jobs:
             
             max_prob = max(day_pops) if day_pops else 0
             prob_str = f"{max_prob}%"
-            
-            # 傘マークも100%化けないクラシック記号（50%以上で雨傘、30%以上で普通の傘）
             umbrella_mark = " ☔" if max_prob >= 50 else (" ☂" if max_prob >= 30 else "")
             
             # --- 3. 最高・最低気温の取得 ---
@@ -125,18 +132,18 @@ jobs:
             temp_12 = t_max_num - 2
             temp_18 = t_max_num - 4
             
-            # 記号の横の余白を通常の半角スペースで美しくフォーマット
+            # 【文字数スリム化対応】「朝(06:00)」などを「06:00」へ完全統一
             forecast_lines = [
                 f"{label_head}の最大降水確率：{prob_str}{umbrella_mark}",
                 f"最低: {tmin_val}°C  最高: {tmax_val}°C",
-                f"朝(06:00) {day_symbol}  {temp_06}°C{get_clothing_advice(temp_06)}",
-                f"昼(12:00) {day_symbol}  {temp_12}°C{get_clothing_advice(temp_12)}",
-                f"夜(18:00) {day_symbol}  {temp_18}°C{get_clothing_advice(temp_18)}"
+                f"06:00 {day_symbol}  {temp_06}°C{get_clothing_advice(temp_06)}",
+                f"12:00 {day_symbol}  {temp_12}°C{get_clothing_advice(temp_12)}",
+                f"18:00 {day_symbol}  {temp_18}°C{get_clothing_advice(temp_18)}"
             ]
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（レトロ記号完全対応版） ---")
+            print("--- 送信データ内容ログ（時間表記スリム化版） ---")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
             print("---------------------------------------------------------")
