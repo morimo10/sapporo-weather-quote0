@@ -1,4 +1,4 @@
-name: Update Weather and Clothing for Dot V2 (Pure JMA Commute Layout)
+name: Update Weather and Clothing for Dot V2 (Pure JMA Complete Hybrid)
 
 on:
   schedule:
@@ -34,8 +34,8 @@ jobs:
         API_KEY = os.environ.get("QUOTE0_API_KEY")
         DEVICE_ID = os.environ.get("QUOTE0_DEVICE_ID")
 
-        # 気象庁モデル(jma_seamless)から、1時間データ(気温・天気)と1日データ(最大降水確率)を純度100%で同時リクエスト
-        OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast?latitude=43.0620&longitude=141.3540&hourly=temperature_2m,weather_code&daily=precipitation_probability_max&timezone=Asia%2FTokyo&models=jma_seamless"
+        # 気象庁モデル(jma_seamless)から、1時間データ(気温・天気)と1日データ(最大降水確率・最高最低気温)をリクエスト
+        OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast?latitude=43.0620&longitude=141.3540&hourly=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Asia%2FTokyo&models=jma_seamless"
         DOT_API_URL = f"https://dot.mindreset.tech/api/authV2/open/device/{DEVICE_ID}/text"
 
         def get_weather_emoji(code):
@@ -58,6 +58,14 @@ jobs:
             elif temp >= 5.0: return " コート"
             else: return " ダウン"
 
+        def get_umbrella_advice(prob):
+            if prob is None: return ""
+            if prob >= 50:
+                return " ☔"
+            elif prob >= 30:
+                return " 🌂"
+            return ""
+
         try:
             response_weather = requests.get(OPEN_METEO_URL)
             res = response_weather.json()
@@ -73,26 +81,41 @@ jobs:
             # 気象庁のデータのみを正確に抽出
             h_temp = hourly.get('temperature_2m_jma_seamless', hourly.get('temperature_2m', []))
             h_code = hourly.get('weather_code_jma_seamless', hourly.get('weather_code', []))
+            
             d_prob = daily.get('precipitation_probability_max_jma_seamless', daily.get('precipitation_probability_max', []))
+            d_tmax = daily.get('temperature_2m_max_jma_seamless', daily.get('temperature_2m_max', []))
+            d_tmin = daily.get('temperature_2m_min_jma_seamless', daily.get('temperature_2m_min', []))
             
             title_text = "札幌市中央区の天気"
             
             jst = timezone(timedelta(hours=9))
             now = datetime.now(jst)
             
-            # 【最適化】夜21時以降は「明日」の予報に切り替え
+            # 夜21時以降は「明日」の予報に切り替え
             is_tomorrow = now.hour >= 21
             target_date = now if not is_tomorrow else now + timedelta(days=1)
             day_idx = 1 if is_tomorrow else 0
             
-            # 気象庁公式の最大降水確率を取得
+            # 気象庁公式の各種1日データを取得
             prob_val = d_prob[day_idx] if d_prob and day_idx < len(d_prob) else None
+            tmax_val = d_tmax[day_idx] if d_tmax and day_idx < len(d_tmax) else None
+            tmin_val = d_tmin[day_idx] if d_tmin and day_idx < len(d_tmin) else None
+            
             prob_str = f"{int(prob_val)}%" if prob_val is not None else "0%"
+            umbrella_mark = get_umbrella_advice(prob_val)
             
-            label_head = "明日の最大降水確率" if is_tomorrow else "今日の最大降水確率"
-            forecast_lines = [f"{label_head}：{prob_str}"]
+            tmax_str = f"{round(tmax_val)}°C" if tmax_val is not None else "?°C"
+            tmin_str = f"{round(tmin_val)}°C" if tmin_val is not None else "?°C"
             
-            # 【変更点】お出かけ・通勤に特化した「6時・12時・18時」に変更しました
+            label_head = "明日" if is_tomorrow else "今日"
+            
+            # ヘッダー部分（降水確率＋傘マーク、および最低・最高気温を追加）
+            forecast_lines = [
+                f"{label_head}の最大降水確率：{prob_str}{umbrella_mark}",
+                f"最低: {tmin_str}  最高: {tmax_str}"
+            ]
+            
+            # 朝・昼・夜のタイムライン（6時、12時、18時）
             slots = [
                 ("朝(06:00)", 6),
                 ("昼(12:00)", 12),
@@ -125,7 +148,7 @@ jobs:
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（通勤・お出かけ特化版） ---")
+            print("--- 送信データ内容ログ（最高最低気温・傘マーク追加版） ---")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
             print("---------------------------------------------------------")
