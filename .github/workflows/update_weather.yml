@@ -1,4 +1,4 @@
-name: Update Weather and Clothing for Dot V2 (Force Spacing)
+name: Update Weather and Clothing for Dot V2 (Pure Data & Fixed Spacing)
 
 on:
   schedule:
@@ -34,6 +34,7 @@ jobs:
         API_KEY = os.environ.get("QUOTE0_API_KEY")
         DEVICE_ID = os.environ.get("QUOTE0_DEVICE_ID")
 
+        # 札幌市中央区中心部（テレビ塔）座標 ＋ 気象庁シームレスモデル
         OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast?latitude=43.0620&longitude=141.3540&hourly=temperature_2m,precipitation_probability,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo&models=jma_seamless"
         DOT_API_URL = f"https://dot.mindreset.tech/api/authV2/open/device/{DEVICE_ID}/text"
 
@@ -73,11 +74,10 @@ jobs:
             d_max = daily.get('temperature_2m_max_jma_seamless', daily.get('temperature_2m_max'))
             d_min = daily.get('temperature_2m_min_jma_seamless', daily.get('temperature_2m_min'))
             
-            max_temp_today = round(d_max[0]) if d_max and d_max[0] is not None else 26
-            min_temp_today = round(d_min[0]) if d_min and d_min[0] is not None else 15
-            
-            if max_temp_today < 26: max_temp_today = 26
-            if min_temp_today < 15: min_temp_today = 15
+            # --- 【修正】強制的な固定値（26℃/15℃）や下限ガードレールをすべて完全に排除 ---
+            # APIが返してきた本物の予想最高・最低気温をそのまま採用します
+            max_temp_today = round(d_max[0]) if d_max and d_max[0] is not None else 0
+            min_temp_today = round(d_min[0]) if d_min and d_min[0] is not None else 0
             
             title_text = f"札幌市中央区 {max_temp_today}℃〜{min_temp_today}℃"
             
@@ -86,6 +86,7 @@ jobs:
             
             times = [datetime.fromisoformat(t).replace(tzinfo=jst) for t in hourly['time']]
             
+            # 偶数時間スタート地点決定ロジック
             base_hour = now.hour if now.hour % 2 == 0 else now.hour - 1
             if base_hour < 0: base_hour = 0
             
@@ -107,42 +108,33 @@ jobs:
                 raw_prob = h_prob[idx]
                 raw_code = h_code[idx]
                 
-                temp_val = round(raw_temp) if raw_temp is not None else max_temp_today
+                temp_val = round(raw_temp) if raw_temp is not None else 0
                 prob_val = int(raw_prob) if raw_prob is not None else 0
                 code_val = int(raw_code) if raw_code is not None else 0
                 
-                # 気象庁発表の実況値マッピング補正
-                if t_str == "12:00": temp_val = 25
-                elif t_str == "14:00" or t_str == "16:00": temp_val = 24
-                elif t_str == "18:00": temp_val = 22
-                
+                # 特定時間の強制上書きもすべて廃止し、予測された生データのみを信用します
                 emoji = get_weather_emoji(code_val)
-                clothing = get_clothing_advice(temp_val)
+                clothing_raw = get_clothing_advice(temp_val)
                 
-                # --- 【修正】半角スペースのトリミング対策 ---
-                # 1桁・2桁の降水確率の時にガタつかないよう、手動で厳密にパディング
+                # --- 【ご提案の反映】各服装文字の先頭に必ず「全角空白」を一律で追加 ---
+                clothing = f"　{clothing_raw}"
+                
+                # ガタつき防止のための純粋な数字幅揃え
                 prob_str = f"{prob_val}%"
-                if len(prob_str) == 2:    # 「0%」など2文字のとき
-                    prob_aligned = f" {prob_str}"
-                else:                     # 「10%」など3文字のとき
-                    prob_aligned = prob_str
+                prob_aligned = f" {prob_str}" if len(prob_str) == 2 else prob_str
                 
-                # 気温も同様に調整
                 temp_str = f"{temp_val}°C"
-                if len(temp_str) == 4:    # 「9°C」など4文字のとき
-                    temp_aligned = f" {temp_str}"
-                else:                     # 「24°C」など5文字のとき
-                    temp_aligned = temp_str
+                temp_aligned = f" {temp_str}" if len(temp_str) == 4 else temp_str
                 
-                # 服装の前に、デバイスシステムに絶対に削除されない「全角スペース」を確実に注入
-                forecast_lines.append(f"{t_str} {emoji} {temp_aligned} {prob_aligned}　{clothing}")
+                # 等幅フォント用フォーマット（服装の前に半角も1つ保険として維持）
+                forecast_lines.append(f"{t_str} {emoji} {temp_aligned} {prob_aligned} {clothing}")
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（全角スペース強制適用版） ---")
+            print("--- 送信データ内容ログ（100%リアル生データ・全角空白強制版） ---")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
-            print("---------------------------------------------")
+            print("---------------------------------------------------------")
 
             headers = {
                 "Authorization": f"Bearer {API_KEY}",
