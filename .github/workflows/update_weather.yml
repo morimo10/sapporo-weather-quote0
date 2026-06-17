@@ -1,4 +1,4 @@
-name: Update Weather and Clothing for Dot V2 (Hybrid JMA Slots)
+name: Update Weather and Clothing for Dot V2 (Hybrid JMA Slots Fixed)
 
 on:
   schedule:
@@ -34,8 +34,8 @@ jobs:
         API_KEY = os.environ.get("QUOTE0_API_KEY")
         DEVICE_ID = os.environ.get("QUOTE0_DEVICE_ID")
 
-        # 【最終URL】気象庁専用キー(jma_seamless)で気温と天気を貰いつつ、標準モデルから降水確率を同時に引っ張る完璧なURLです
-        OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast?latitude=43.0620&longitude=141.3540&hourly=temperature_2m_jma_seamless,weather_code_jma_seamless,precipitation_probability&timezone=Asia%2FTokyo"
+        # 【正しいURL】models=best_match(標準)とjma_seamless(気象庁)を並べ、hourlyでデータをまとめて請求します。
+        OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast?latitude=43.0620&longitude=141.3540&hourly=temperature_2m,precipitation_probability,weather_code&timezone=Asia%2FTokyo&models=best_match,jma_seamless"
         DOT_API_URL = f"https://dot.mindreset.tech/api/authV2/open/device/{DEVICE_ID}/text"
 
         def get_weather_emoji(code):
@@ -69,10 +69,12 @@ jobs:
             hourly = res['hourly']
             h_time_strings = hourly.get('time', [])
             
-            # ハイブリッド抽出（気温・天気は気象庁、降水確率は標準から取得）
-            h_temp = hourly.get('temperature_2m_jma_seamless', [])
-            h_code = hourly.get('weather_code_jma_seamless', [])
-            h_prob = hourly.get('precipitation_probability', []) # ここに確実な数字が入ります
+            # 複数モデルを指定した際、APIから返ってくる正しいキー名（末尾にモデル名が付く）で正確にキャッチします
+            h_temp_jma = hourly.get('temperature_2m_jma_seamless', [])
+            h_code_jma = hourly.get('weather_code_jma_seamless', [])
+            
+            # 降水確率はデータ切れの起きない標準モデル(best_match)から取得
+            h_prob_std = hourly.get('precipitation_probability_best_match', hourly.get('precipitation_probability', []))
             
             title_text = "札幌市中央区の天気"
             
@@ -98,9 +100,11 @@ jobs:
                 if target_time_str in h_time_strings:
                     idx = h_time_strings.index(target_time_str)
                 
-                raw_temp = h_temp[idx] if (idx != -1 and idx < len(h_temp)) else None
-                raw_code = h_code[idx] if (idx != -1 and idx < len(h_code)) else None
-                raw_prob = h_prob[idx] if (idx != -1 and idx < len(h_prob)) else None
+                # 気象庁のリアルな気温と天気
+                raw_temp = h_temp_jma[idx] if (idx != -1 and idx < len(h_temp_jma)) else None
+                raw_code = h_code_jma[idx] if (idx != -1 and idx < len(h_code_jma)) else None
+                # 標準モデルの確実な降水確率
+                raw_prob = h_prob_std[idx] if (idx != -1 and idx < len(h_prob_std)) else None
                 
                 if raw_temp is not None:
                     temp_num = round(raw_temp)
@@ -114,7 +118,7 @@ jobs:
                     prob_num = int(raw_prob)
                     prob_display = f"{prob_num}%"
                 else:
-                    prob_display = "0%" # 万が一のフォールバック
+                    prob_display = "0%"
                 
                 emoji = get_weather_emoji(raw_code)
                 
@@ -125,7 +129,7 @@ jobs:
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（ハイブリッド朝昼夜・確定版） ---")
+            print("--- 送信データ内容ログ（朝昼夜ハイブリッド・エラー修正版） ---")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
             print("---------------------------------------------------------")
