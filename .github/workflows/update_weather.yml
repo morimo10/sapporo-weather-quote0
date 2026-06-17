@@ -1,4 +1,4 @@
-name: Update Weather and Clothing for Dot V2 (Pure JMA Complete Hybrid)
+name: Update Weather and Clothing for Dot V2 (Pure JMA Complete Hybrid v3)
 
 on:
   schedule:
@@ -34,8 +34,8 @@ jobs:
         API_KEY = os.environ.get("QUOTE0_API_KEY")
         DEVICE_ID = os.environ.get("QUOTE0_DEVICE_ID")
 
-        # 気象庁モデル(jma_seamless)から、1時間データ(気温・天気)と1日データ(最大降水確率・最高最低気温)をリクエスト
-        OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast?latitude=43.0620&longitude=141.3540&hourly=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Asia%2FTokyo&models=jma_seamless"
+        # 気象庁モデル(jma_seamless)から、必要なデータを純度100%で同時リクエスト（1日の代表天気コードを追加）
+        OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast?latitude=43.0620&longitude=141.3540&hourly=temperature_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Asia%2FTokyo&models=jma_seamless"
         DOT_API_URL = f"https://dot.mindreset.tech/api/authV2/open/device/{DEVICE_ID}/text"
 
         def get_weather_emoji(code):
@@ -82,11 +82,10 @@ jobs:
             h_temp = hourly.get('temperature_2m_jma_seamless', hourly.get('temperature_2m', []))
             h_code = hourly.get('weather_code_jma_seamless', hourly.get('weather_code', []))
             
+            d_code = daily.get('weather_code_jma_seamless', daily.get('weather_code', []))
             d_prob = daily.get('precipitation_probability_max_jma_seamless', daily.get('precipitation_probability_max', []))
             d_tmax = daily.get('temperature_2m_max_jma_seamless', daily.get('temperature_2m_max', []))
             d_tmin = daily.get('temperature_2m_min_jma_seamless', daily.get('temperature_2m_min', []))
-            
-            title_text = "札幌市中央区の天気"
             
             jst = timezone(timedelta(hours=9))
             now = datetime.now(jst)
@@ -95,6 +94,13 @@ jobs:
             is_tomorrow = now.hour >= 21
             target_date = now if not is_tomorrow else now + timedelta(days=1)
             day_idx = 1 if is_tomorrow else 0
+            
+            # 1日全体の天気絵文字を取得
+            day_code_val = d_code[day_idx] if d_code and day_idx < len(d_code) else None
+            day_emoji = get_weather_emoji(day_code_val)
+            
+            # 【変更点】タイトルの最後に「: 天気絵文字」を表示
+            title_text = f"札幌市中央区の天気: {day_emoji}"
             
             # 気象庁公式の各種1日データを取得
             prob_val = d_prob[day_idx] if d_prob and day_idx < len(d_prob) else None
@@ -109,7 +115,6 @@ jobs:
             
             label_head = "明日" if is_tomorrow else "今日"
             
-            # ヘッダー部分（降水確率＋傘マーク、および最低・最高気温を追加）
             forecast_lines = [
                 f"{label_head}の最大降水確率：{prob_str}{umbrella_mark}",
                 f"最低: {tmin_str}  最高: {tmax_str}"
@@ -148,7 +153,7 @@ jobs:
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（最高最低気温・傘マーク追加版） ---")
+            print("--- 送信データ内容ログ（タイトル天気絵文字追加版） ---")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
             print("---------------------------------------------------------")
