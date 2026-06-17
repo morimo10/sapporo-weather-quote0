@@ -49,13 +49,13 @@ jobs:
 
         # 【修正】ユーザー指定の新しい服装基準を実装
         def get_clothing_advice(temp):
-            if temp >= 30.0: return "Tシャツ"
-            elif temp >= 25.0: return "半袖"
-            elif temp >= 20.0: return "長袖"
-            elif temp >= 15.0: return "セーター"
-            elif temp >= 10.0: return "ジャケット"
-            elif temp >= 5.0: return "コート"
-            else: return "ダウン"
+            if temp >= 30.0: return "　Ｔシャツ"
+            elif temp >= 25.0: return "　半袖"
+            elif temp >= 20.0: return "　長袖"
+            elif temp >= 15.0: return "　セーター"
+            elif temp >= 10.0: return "　ジャケット"
+            elif temp >= 5.0: return "　コート"
+            else: return "　ダウン"
 
         try:
             response_weather = requests.get(OPEN_METEO_URL)
@@ -128,7 +128,7 @@ jobs:
                 prob_aligned = prob_str.rjust(4)
                 
                 # 【修正】服装の前に「半角空白」を1つ空けるように成形
-                forecast_lines.append(f"{t_str} {emoji} {temp_aligned} {prob_aligned} {clothing}")
+                # forecast_lines.append(f"{t_str} {emoji} {temp_aligned} {prob_aligned} {clothing}")
             
             weather_message = "\n".join(forecast_lines)
             
