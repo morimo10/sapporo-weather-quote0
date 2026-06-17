@@ -1,9 +1,10 @@
-name: Update Weather and Clothing for Dot V2 (Pure JMA Minimalist Message)
+name: Update Weather and Clothing for Dot V2 (Pure JMA Daytime Active Version)
 
 on:
   schedule:
-    # 30分ごとに自動実行
-    - cron: '0,30 * * * *'
+    # 日本時間(JST)の 06:00 から 22:00 までの間、30分ごとに自動実行
+    # （22:30 から翌朝 05:30 までの夜間・早朝は完全にスリープします）
+    - cron: '0,30 21-23,0-12 * * *'
   workflow_dispatch:
 
 jobs:
@@ -133,7 +134,6 @@ jobs:
             temp_12 = t_max_num - 2
             temp_18 = t_max_num - 4
             
-            # 【要望対応】「今日（明日）の」を完全削除して「最大降水確率：」から開始
             forecast_lines = [
                 f"最大降水確率：{prob_str}{umbrella_mark}",
                 f"最低: {tmin_val}°C  最高: {tmax_val}°C",
@@ -144,7 +144,7 @@ jobs:
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（日付ラベル削除版） ---")
+            print("--- 送信データ内容ログ（06:00〜22:00稼動版） ---")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
             print("---------------------------------------------------------")
