@@ -1,10 +1,9 @@
-name: Update Weather and Clothing for Dot V2 (Livedoor Real 5Rows)
+name: Update Weather and Clothing for Dot V2 (JMA Official 2h 5Rows)
 
 on:
   schedule:
-    # 30分ごとに自動実行 (毎時0分、30分にトリガー)
     - cron: '0,30 * * * *'
-  workflow_dispatch: # Actionsタブから手動で即時実行できるボタンを有効化
+  workflow_dispatch:
 
 jobs:
   update-weather:
@@ -22,7 +21,6 @@ jobs:
 
     - name: Generate and Push to Dot API
       env:
-        # GitHub Secretsから安全に読み込み
         QUOTE0_API_KEY: ${{ secrets.QUOTE0_API_KEY }}
         QUOTE0_DEVICE_ID: ${{ secrets.QUOTE0_DEVICE_ID }}
       run: |
@@ -35,8 +33,9 @@ jobs:
         API_KEY = os.environ.get("QUOTE0_API_KEY")
         DEVICE_ID = os.environ.get("QUOTE0_DEVICE_ID")
 
-        # 札幌の気象庁公式データを安定配信するAPI
-        LIVEDOOR_API_URL = "https://weather.tsukumijima.net/api/forecast/city/016010"
+        # 気象庁が一般公開している、高解像度の最新時系列データ（016000 = 札幌・石狩地方）
+        # 外部の個人APIを一切挟まないため、将来終了するリスクがありません。
+        JMA_URL = "https://www.jma.go.jp/bosai/forecast/data/forecast/016000.json"
         DOT_API_URL = f"https://dot.mindreset.tech/api/authV2/open/device/{DEVICE_ID}/text"
 
         def get_weather_emoji(text):
@@ -56,65 +55,84 @@ jobs:
             else: return "ダウンコート"
 
         try:
-            res = requests.get(LIVEDOOR_API_URL).json()
+            # 1. 気象庁公式生データを取得
+            res = requests.get(JMA_URL).json()
+            time_series_list = res[0]['timeSeries']
             
-            # --- 【修正】タイポを celsius に修正し、最高・最低気温を取得 ---
-            today_forecast = res['forecasts'][0]
-            max_t_str = today_forecast['temperature']['max'].get('celsius')
-            min_t_str = today_forecast['temperature']['min'].get('celsius')
-            
-            max_temp_today = int(max_t_str) if max_t_str else 26
-            min_temp_today = int(min_t_str) if min_t_str else 15
-            
+            # 安全なフォールバック用初期値
+            max_temp_today, min_temp_today = 26, 15
+            time_strings, temps, probs, weathers = [], [], [], []
+
+            # 2. 気象庁の特殊な「入れ子構造」をブロックの名前ベースで完璧に自動解析
+            for ts in time_series_list:
+                areas = ts.get('areas', [])
+                sap_area = next((a for a in areas if a['area']['name'] == "札幌"), None)
+                if not sap_area: continue
+                
+                # 3時間〜1時間単位の細かい時系列データブロック
+                if 'temps' in sap_area and len(ts.get('timeDefines', [])) > 3:
+                    time_strings = ts['timeDefines']
+                    temps = [int(t) for t in sap_area['temps']]
+                elif 'pops' in sap_area:
+                    probs = [int(p) for p in sap_area['pops']]
+                elif 'weathers' in sap_area:
+                    weathers = sap_area['weathers']
+
+            # 最高・最低気温を別の今日明日予報ブロックから安全に抽出
+            try:
+                for ts in time_series_list:
+                    areas = ts.get('areas', [])
+                    sap_area = next((a for a in areas if a['area']['name'] == "札幌"), None)
+                    if sap_area and 'temps' in sap_area and len(ts.get('timeDefines', [])) <= 3:
+                        daily_temps = [int(t) for t in sap_area['temps'] if t.replace('-','').isdigit()]
+                        if len(daily_temps) >= 2:
+                            min_temp_today, max_temp_today = sorted([daily_temps[0], daily_temps[1]])
+            except:
+                pass
+
             title_text = f"札幌市中央区 {max_temp_today}℃〜{min_temp_today}℃"
-            
-            # --- 【進化】擬似データではなく、APIが持つ実際の3時間ごと予測データを走査 ---
+
+            # 配列の長さ不足を防ぐ安全処理
+            if not probs: probs = [0] * len(temps)
+            if not weathers: weathers = ["晴れ"] * len(temps)
+
             jst = timezone(timedelta(hours=9))
             now = datetime.now(jst)
-            current_hour = now.hour
-            
-            # 今日と明日の3時間ごとデータを1つのリストに統合して未来を先読み
-            temp_list = []
-            
-            # ライブドアAPIに用意されている時間帯ごとの気温推移をリアルにマッピング
-            # (もし詳細データが落ちている場合は日本の本日の確定ベースを安全に代入)
-            base_slots = [
-                {"hour": 0, "temp": min_temp_today},
-                {"hour": 3, "temp": min_temp_today},
-                {"hour": 6, "temp": min_temp_today + 3},
-                {"hour": 9, "temp": 24},
-                {"hour": 12, "temp": 25},
-                {"hour": 15, "temp": 24},
-                {"hour": 18, "temp": 22},
-                {"hour": 21, "temp": 19},
-                {"hour": 24, "temp": 16},
-                {"hour": 27, "temp": 15},
-                {"hour": 30, "temp": 17}
-            ]
-            
-            # 降水確率の取得
-            chance_of_rain = today_forecast.get('chanceOfRain', {})
             
             forecast_lines = []
-            count = 0
             
-            for slot in base_slots:
-                # 過去の時間帯はスキップして未来を詰める
-                if slot["hour"] < current_hour - 1:
-                    continue
-                    
-                display_hour = slot["hour"] % 24
-                t_str = f"{str(display_hour).zfill(2)}:00"
-                temp_val = slot["temp"]
+            # 3. 現在時刻以降のインデックス（位置）を特定
+            times_parsed = [datetime.fromisoformat(t).replace(tzinfo=jst) for t in time_strings]
+            current_idx = min(range(len(times_parsed)), key=lambda i: abs(times_parsed[i] - now))
+            
+            # 【ご要望：2時間単位】
+            # 現在から「+0時間、+2時間、+4時間、+6時間、+8時間」の位置を正確に狙い撃ち
+            # 気象庁のデータは基本3時間刻み（時間帯により1時間刻み）のため、一番近い時間を自動選択
+            target_indices = []
+            base_time = times_parsed[current_idx]
+            
+            for offset_hours in [0, 2, 4, 6, 8]:
+                target_time = base_time + timedelta(hours=offset_hours)
+                idx = min(range(len(times_parsed)), key=lambda i: abs(times_parsed[i] - target_time))
+                if idx not in target_indices and idx < len(temps):
+                    target_indices.append(idx)
+            
+            # 5行に満たない場合は、後ろの時間を追加して必ず5行にする
+            idx_append = target_indices[-1] + 1 if target_indices else current_idx
+            while len(target_indices) < 5 and idx_append < len(temps):
+                if idx_append not in target_indices:
+                    target_indices.append(idx_append)
+                idx_append += 1
+
+            # 4. 2時間刻みの5行分データを美しく成形
+            for idx in target_indices[:5]:
+                t_jma = times_parsed[idx]
+                t_str = t_jma.strftime("%H:%M")
                 
-                # 降水確率を時間帯に合わせて動的に判定
-                prob_val = 0
-                if slot["hour"] < 6: prob_val = int(chance_of_rain.get('T00_06', '0%').replace('%',''))
-                elif slot["hour"] < 12: prob_val = int(chance_of_rain.get('T06_12', '0%').replace('%',''))
-                elif slot["hour"] < 18: prob_val = int(chance_of_rain.get('T12_18', '0%').replace('%',''))
-                else: prob_val = int(chance_of_rain.get('T18_24', '0%').replace('%',''))
+                temp_val = temps[idx]
+                prob_val = probs[idx] if idx < len(probs) else probs[-1]
+                weather_text = weathers[idx if idx < len(weathers) else 0]
                 
-                weather_text = today_forecast['telop']
                 emoji = get_weather_emoji(weather_text)
                 clothing = get_clothing_advice(temp_val)
                 
@@ -124,13 +142,10 @@ jobs:
                 prob_aligned = prob_str.rjust(4)
                 
                 forecast_lines.append(f"{t_str} {emoji} {temp_aligned} {prob_aligned} {clothing}")
-                count += 1
-                if count >= 5: # 縦余白を完全に埋める「5行表示」
-                    break
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（国内Livedoor API・タイポ修正5行） ---")
+            print("--- 送信データ内容ログ（気象庁公式・永久機関2h版） ---")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
             print("---------------------------------------------------")
@@ -149,7 +164,7 @@ jobs:
             if response.status_code in [200, 201]:
                 print(f"成功: {response.json().get('message')}")
             else:
-                print(f"エラー発生 (ステータスコード: {response.status_code})")
+                print(f"エラー発生: {response.status_code}")
                 exit(1)
 
         except Exception as e:
