@@ -1,4 +1,4 @@
-name: Update Weather and Clothing for Dot V2 (Fix Spacing)
+name: Update Weather and Clothing for Dot V2 (Monospace Style)
 
 on:
   schedule:
@@ -119,20 +119,18 @@ jobs:
                 emoji = get_weather_emoji(code_val)
                 clothing = get_clothing_advice(temp_val)
                 
-                # --- 【修正】文字幅の右寄せバランスを変更し、被りを防止 ---
-                # 気温を「4マス幅」、降水確率を「3マス幅」に縮めることで、右側に余裕を持たせます
+                # 等幅フォントの恩恵を最大化するため、幅を美しく揃える
                 temp_str = f"{temp_val}°C"
                 prob_str = f"{prob_val}%"
                 
                 temp_aligned = temp_str.rjust(4)
                 prob_aligned = prob_str.rjust(3)
                 
-                # さらに、降水確率と服装の間にハッキリと「半袖」「長袖」の前の半角スペース（計2マス分）を確保
                 forecast_lines.append(f"{t_str} {emoji} {temp_aligned} {prob_aligned}  {clothing}")
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（重なり修正版） ---")
+            print("--- 送信データ内容ログ（等幅フォント指定版） ---")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
             print("---------------------------------------------")
@@ -141,10 +139,12 @@ jobs:
                 "Authorization": f"Bearer {API_KEY}",
                 "Content-Type": "application/json"
             }
+            # 【修正】payloadに style を追加して、タイトルとメッセージ両方を等幅フォントに強制指定
             payload = {
                 "refreshNow": True,
                 "title": title_text,
-                "message": weather_message
+                "message": weather_message,
+                "style": "UnifontExMono16"
             }
             
             response = requests.post(DOT_API_URL, headers=headers, json=payload)
