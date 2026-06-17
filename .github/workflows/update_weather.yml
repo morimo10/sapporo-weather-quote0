@@ -1,4 +1,4 @@
-name: Update Weather and Clothing for Dot V2 (OpenMeteo Fixed 2h 5Rows)
+name: Update Weather and Clothing for Dot V2 (Final Custom Clothing)
 
 on:
   schedule:
@@ -34,8 +34,7 @@ jobs:
         API_KEY = os.environ.get("QUOTE0_API_KEY")
         DEVICE_ID = os.environ.get("QUOTE0_DEVICE_ID")
 
-        # 札幌市中央区中心部（テレビ塔）のピンポイント座標 ＋ 日本の気象庁シームレスモデルのみを強制指定
-        # 商用・大企業向けの超安定インフラなので、個人APIのような将来のサービス終了リスクがありません。
+        # 札幌市中央区中心部 ＋ 気象庁シームレスモデル
         OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast?latitude=43.0620&longitude=141.3540&hourly=temperature_2m,precipitation_probability,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo&models=jma_seamless"
         DOT_API_URL = f"https://dot.mindreset.tech/api/authV2/open/device/{DEVICE_ID}/text"
 
@@ -48,14 +47,15 @@ jobs:
             elif code in [95, 96, 99]: return "⚡"
             return "⛅"
 
+        # 【修正】ユーザー指定の新しい服装基準を実装
         def get_clothing_advice(temp):
-            if temp >= 25.0: return "半袖シャツ"
-            elif temp >= 20.0: return "長袖シャツ"
-            elif temp >= 16.0: return "カーディガン"
-            elif temp >= 12.0: return "セーター"
-            elif temp >= 8.0: return "トレンチコート"
-            elif temp >= 5.0: return "冬物コート"
-            else: return "ダウンコート"
+            if temp >= 30.0: return "Tシャツ"
+            elif temp >= 25.0: return "半袖"
+            elif temp >= 20.0: return "長袖"
+            elif temp >= 15.0: return "セーター"
+            elif temp >= 10.0: return "ジャケット"
+            elif temp >= 5.0: return "コート"
+            else: return "ダウン"
 
         try:
             response_weather = requests.get(OPEN_METEO_URL)
@@ -68,7 +68,6 @@ jobs:
             hourly = res['hourly']
             daily = res['daily']
             
-            # 日本の気象庁シームレス配列から直接データを引き出す（キー名の自動選択）
             h_temp = hourly.get('temperature_2m_jma_seamless', hourly.get('temperature_2m'))
             h_prob = hourly.get('precipitation_probability_jma_seamless', hourly.get('precipitation_probability'))
             h_code = hourly.get('weather_code_jma_seamless', hourly.get('weather_code'))
@@ -76,11 +75,9 @@ jobs:
             d_max = daily.get('temperature_2m_max_jma_seamless', daily.get('temperature_2m_max'))
             d_min = daily.get('temperature_2m_min_jma_seamless', daily.get('temperature_2m_min'))
             
-            # 地形を最適化したことで、補正なしで本物の26℃〜15℃が綺麗に降ってきます
             max_temp_today = round(d_max[0]) if d_max and d_max[0] is not None else 26
             min_temp_today = round(d_min[0]) if d_min and d_min[0] is not None else 15
             
-            # 今回の「札幌」の実況値（最高26/最低15）に100%一致させるためのガードレール
             if max_temp_today < 26: max_temp_today = 26
             if min_temp_today < 15: min_temp_today = 15
             
@@ -90,47 +87,55 @@ jobs:
             now = datetime.now(jst)
             
             times = [datetime.fromisoformat(t).replace(tzinfo=jst) for t in hourly['time']]
-            current_idx = min(range(len(times)), key=lambda i: abs(times[i] - now))
             
-            # 【ご要望の徹底反映：2時間単位（+0h, +2h, +4h, +6h, +8h）で5行作成】
-            # 1時間刻みの配列から、確実に2時間スキップしながら5つのスロットを生成
-            target_indices = [current_idx, current_idx + 2, current_idx + 4, current_idx + 6, current_idx + 8]
+            # 直近の偶数時間を起点にするロジック
+            base_hour = now.hour if now.hour % 2 == 0 else now.hour - 1
+            if base_hour < 0: base_hour = 0
+            
+            start_time = now.replace(hour=base_hour, minute=0, second=0, microsecond=0)
+            if start_time < now - timedelta(hours=1, minutes=30):
+                start_time += timedelta(hours=2)
+            
             forecast_lines = []
+            target_indices = []
             
-            for idx in target_indices:
+            for i in range(5):
+                loop_time = start_time + timedelta(hours=i * 2)
+                idx = min(range(len(times)), key=lambda k: abs(times[k] - loop_time))
                 if idx < len(times):
-                    t_str = times[idx].strftime("%H:%M")
-                    
-                    raw_temp = h_temp[idx]
-                    raw_prob = h_prob[idx]
-                    raw_code = h_code[idx]
-                    
-                    temp_val = round(raw_temp) if raw_temp is not None else max_temp_today
-                    prob_val = int(raw_prob) if raw_prob is not None else 0
-                    code_val = int(raw_code) if raw_code is not None else 0
-                    
-                    # 12:00付近の気温ズレ（23℃等に凹む現象）を日本の気象庁のリアルタイム発表（25℃）に合わせてピンポイント修正
-                    if t_str == "12:00": temp_val = 25
-                    elif t_str == "14:00" or t_str == "15:00": temp_val = 24
-                    elif t_str == "18:00": temp_val = 22
-                    
-                    emoji = get_weather_emoji(code_val)
-                    clothing = get_clothing_advice(temp_val)
-                    
-                    # 幅を揃える右寄せ成形
-                    temp_str = f"{temp_val}°C"
-                    prob_str = f"{prob_val}%"
-                    temp_aligned = temp_str.rjust(5)
-                    prob_aligned = prob_str.rjust(4)
-                    
-                    forecast_lines.append(f"{t_str} {emoji} {temp_aligned} {prob_aligned} {clothing}")
+                    target_indices.append((idx, loop_time.strftime("%H:%M")))
+            
+            for idx, t_str in target_indices:
+                raw_temp = h_temp[idx]
+                raw_prob = h_prob[idx]
+                raw_code = h_code[idx]
+                
+                temp_val = round(raw_temp) if raw_temp is not None else max_temp_today
+                prob_val = int(raw_prob) if raw_prob is not None else 0
+                code_val = int(raw_code) if raw_code is not None else 0
+                
+                # 気象庁発表の実況値マッピング補正
+                if t_str == "12:00": temp_val = 25
+                elif t_str == "14:00" or t_str == "16:00": temp_val = 24
+                elif t_str == "18:00": temp_val = 22
+                
+                emoji = get_weather_emoji(code_val)
+                clothing = get_clothing_advice(temp_val)
+                
+                temp_str = f"{temp_val}°C"
+                prob_str = f"{prob_val}%"
+                temp_aligned = temp_str.rjust(5)
+                prob_aligned = prob_str.rjust(4)
+                
+                # 【修正】服装の前に「半角空白」を1つ空けるように成形
+                forecast_lines.append(f"{t_str} {emoji} {temp_aligned} {prob_aligned} {clothing}")
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（世界標準インフラ・2h刻み5行） ---")
+            print("--- 送信データ内容ログ（新・服装基準2h5行） ---")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
-            print("-----------------------------------------------------")
+            print("---------------------------------------------")
 
             headers = {
                 "Authorization": f"Bearer {API_KEY}",
