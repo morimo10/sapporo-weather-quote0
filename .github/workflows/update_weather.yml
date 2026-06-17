@@ -1,4 +1,4 @@
-name: Update Weather and Clothing for Dot V2 (Fixed Morning, Day, Night)
+name: Update Weather and Clothing for Dot V2 (Pure JMA 3-Slots)
 
 on:
   schedule:
@@ -34,8 +34,8 @@ jobs:
         API_KEY = os.environ.get("QUOTE0_API_KEY")
         DEVICE_ID = os.environ.get("QUOTE0_DEVICE_ID")
 
-        # 【超重要】降水確率が消えるバグを消し去るため、安定性100%の標準高精度モデルURLに一本化します。
-        OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast?latitude=43.0620&longitude=141.3540&hourly=temperature_2m,precipitation_probability,weather_code&timezone=Asia%2FTokyo"
+        # 気象庁モデル(jma_seamless)のみを指定してリクエスト
+        OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast?latitude=43.0620&longitude=141.3540&hourly=temperature_2m,precipitation_probability,weather_code&timezone=Asia%2FTokyo&models=jma_seamless"
         DOT_API_URL = f"https://dot.mindreset.tech/api/authV2/open/device/{DEVICE_ID}/text"
 
         def get_weather_emoji(code):
@@ -68,22 +68,25 @@ jobs:
                 
             hourly = res['hourly']
             h_time_strings = hourly.get('time', [])
-            h_temp = hourly.get('temperature_2m', [])
-            h_prob = hourly.get('precipitation_probability', [])
-            h_code = hourly.get('weather_code', [])
+            
+            # 【解決の鍵】気象庁専用の正しいデータキー名（_jma_seamless）から直接データを引っこ抜く
+            h_temp = hourly.get('temperature_2m_jma_seamless', [])
+            h_prob = hourly.get('precipitation_probability_jma_seamless', [])
+            h_code = hourly.get('weather_code_jma_seamless', [])
             
             title_text = "札幌市中央区の天気"
             
             jst = timezone(timedelta(hours=9))
             now = datetime.now(jst)
             
-            # 夜21時を過ぎたら、翌日の朝昼夜データを先取りして表示
+            # 夜21時以降は明日の予定を表示（それまでは今日のデータを固定表示）
             target_date = now if now.hour < 21 else now + timedelta(days=1)
             
+            # 気象庁の3時間予報データにジャストで存在する「09:00, 15:00, 21:00」を朝・昼・夜として採用
             slots = [
-                ("朝(08:00)", 8),
-                ("昼(14:00)", 14),
-                ("夜(20:00)", 20)
+                ("朝(09:00)", 9),
+                ("昼(15:00)", 15),
+                ("夜(21:00)", 21)
             ]
             
             forecast_lines = []
@@ -92,11 +95,11 @@ jobs:
                 target_dt = target_date.replace(hour=hour, minute=0, second=0, microsecond=0)
                 target_time_str = target_dt.strftime("%Y-%m-%dT%H:%M")
                 
-                # 指定時間（08:00, 14:00, 20:00）をピンポイントで検索
                 idx = -1
                 if target_time_str in h_time_strings:
                     idx = h_time_strings.index(target_time_str)
                 
+                # 気象庁の配列からデータを抽出
                 raw_temp = h_temp[idx] if (idx != -1 and idx < len(h_temp)) else None
                 raw_prob = h_prob[idx] if (idx != -1 and idx < len(h_prob)) else None
                 raw_code = h_code[idx] if (idx != -1 and idx < len(h_code)) else None
@@ -109,7 +112,6 @@ jobs:
                     temp_display = "?°C"
                     clothing = get_clothing_advice(None)
                 
-                # 標準URLのため、今回は確実に降水確率(数字)がヒットします
                 if raw_prob is not None:
                     prob_num = int(raw_prob)
                     prob_display = f"{prob_num}%"
@@ -125,7 +127,7 @@ jobs:
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（朝昼夜・完全復旧版） ---")
+            print("--- 送信データ内容ログ（気象庁公式・朝昼夜完全直撃版） ---")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
             print("---------------------------------------------------------")
