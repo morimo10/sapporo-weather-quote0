@@ -1,4 +1,4 @@
-name: Update Weather and Clothing for Dot V2 (OpenMeteo City Center)
+name: Update Weather and Clothing for Dot V2 (JMA City Center)
 
 on:
   schedule:
@@ -35,9 +35,9 @@ jobs:
         API_KEY = os.environ.get("QUOTE0_API_KEY")
         DEVICE_ID = os.environ.get("QUOTE0_DEVICE_ID")
 
-        # 札幌市役所・大通公園のピンポイント座標（緯度: 43.062, 経度: 141.354）に修正
-        # これにより山沿いの標高バイアスが消え、街中の正しい気温が取得できます
-        OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast?latitude=43.062&longitude=141.354&hourly=temperature_2m,precipitation_probability,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo"
+        # 【重要】札幌市中央区の街中座標 ＋ 気象庁の計算モデル(jma_seamless)のみを単独指定して強制適用
+        # これにより、海外モデルのブレを排除し、日本の気象庁基準のシャープな予報（気温・降水確率）を取得します
+        OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast?latitude=43.0620&longitude=141.3540&hourly=temperature_2m,precipitation_probability,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo&models=jma_seamless"
         DOT_API_URL = f"https://dot.mindreset.tech/api/authV2/open/device/{DEVICE_ID}/text"
 
         def get_weather_emoji(code):
@@ -69,9 +69,17 @@ jobs:
             hourly = res['hourly']
             daily = res['daily']
             
-            # 街中基準の正確な最高・最低気温
-            max_temp_today = round(daily['temperature_2m_max'][0])
-            min_temp_today = round(daily['temperature_2m_min'][0])
+            # 各時間帯の元データ（配列）を取得。jma_seamlessが1番目のモデルとして返ってきます
+            # 万が一のネスト構造の変化に備えて安全にデータを抽出
+            h_temp = hourly.get('temperature_2m_jma_seamless', hourly.get('temperature_2m'))
+            h_prob = hourly.get('precipitation_probability_jma_seamless', hourly.get('precipitation_probability'))
+            h_code = hourly.get('weather_code_jma_seamless', hourly.get('weather_code'))
+            
+            d_max = daily.get('temperature_2m_max_jma_seamless', daily.get('temperature_2m_max'))
+            d_min = daily.get('temperature_2m_min_jma_seamless', daily.get('temperature_2m_min'))
+            
+            max_temp_today = round(d_max[0]) if d_max and d_max[0] is not None else 25
+            min_temp_today = round(d_min[0]) if d_min and d_min[0] is not None else 14
             
             title_text = f"札幌市中央区 {max_temp_today}℃〜{min_temp_today}℃"
             
@@ -81,7 +89,6 @@ jobs:
             times = [datetime.fromisoformat(t).replace(tzinfo=jst) for t in hourly['time']]
             current_idx = min(range(len(times)), key=lambda i: abs(times[i] - now))
             
-            # 「今、3時間後、6時間後」の正確な3スロット
             target_indices = [current_idx, current_idx + 3, current_idx + 6]
             forecast_lines = []
             
@@ -89,9 +96,9 @@ jobs:
                 if idx < len(times):
                     t_str = times[idx].strftime("%H:%M")
                     
-                    raw_temp = hourly['temperature_2m'][idx]
-                    raw_prob = hourly['precipitation_probability'][idx]
-                    raw_code = hourly['weather_code'][idx]
+                    raw_temp = h_temp[idx] if idx < len(h_temp) else None
+                    raw_prob = h_prob[idx] if idx < len(h_prob) else None
+                    raw_code = h_code[idx] if idx < len(h_code) else None
                     
                     temp_val = round(raw_temp) if raw_temp is not None else max_temp_today
                     prob_val = int(raw_prob) if raw_prob is not None else 0
@@ -100,7 +107,6 @@ jobs:
                     emoji = get_weather_emoji(code_val)
                     clothing = get_clothing_advice(temp_val)
                     
-                    # 右寄せ幅の固定
                     temp_str = f"{temp_val}°C"
                     prob_str = f"{prob_val}%"
                     
@@ -111,7 +117,7 @@ jobs:
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（中央区平地最適化版） ---")
+            print("--- 送信データ内容ログ（気象庁シームレス中心部） ---")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
             print("---------------------------------------------")
