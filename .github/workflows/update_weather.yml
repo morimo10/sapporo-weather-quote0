@@ -1,4 +1,4 @@
-name: Update Weather and Clothing for Dot V2 (Pure Pure JMA Official Direct)
+name: Update Weather and Clothing for Dot V2 (Pure JMA Custom Clothing)
 
 on:
   schedule:
@@ -49,14 +49,14 @@ jobs:
             elif "雷" in text: return "⚡"
             return "⛅"
 
+        # 【新基準に完全アップデート】
         def get_clothing_advice(temp):
             if temp is None: return " 調整着"
-            if temp >= 30: return " Tシャツ"
-            elif temp >= 25: return " 半袖"
-            elif temp >= 20: return " 長袖"
-            elif temp >= 15: return " セーター"
-            elif temp >= 10: return " ジャケット"
-            elif temp >= 5: return " コート"
+            if temp >= 30: return " Ｔシャツ"
+            elif temp >= 25: return " 半袖シャツ"
+            elif temp >= 20: return " 長袖シャツ"
+            elif temp >= 15: return " 薄手ジャケット"
+            elif temp >= 10: return " コート"
             else: return " ダウン"
 
         try:
@@ -65,7 +65,6 @@ jobs:
             
             # 札幌（地域コード: 016010）のエリアデータを特定
             area_forecast = res[0]  # 直近の天気・気温
-            area_time_series = res[1] # 降水確率などの時系列
             
             jst = timezone(timedelta(hours=9))
             now = datetime.now(jst)
@@ -76,7 +75,6 @@ jobs:
             label_head = "明日" if is_tomorrow else "今日"
             
             # --- 1. 天気と代表絵文字の取得 ---
-            # 札幌エリアのインデックスを探す（通常は0番目）
             weather_areas = area_forecast['timeSeries'][0]['areas']
             sapporo_weather = next((a for a in weather_areas if a['area']['code'] == '016010'), weather_areas[0])
             
@@ -89,8 +87,6 @@ jobs:
             prob_areas = prob_time_series['areas']
             sapporo_prob = next((a for a in prob_areas if a['area']['code'] == '016010'), prob_areas[0])
             
-            # 該当日の最大降水確率を計算
-            # 6時間ごとのデータが入っているので、対象日の時間帯から最大値を引っ張る
             prob_pops = sapporo_prob['pops']
             prob_times = prob_time_series['timeDefines']
             
@@ -109,31 +105,24 @@ jobs:
             temp_areas = temp_time_series['areas']
             sapporo_temp = next((a for a in temp_areas if a['area']['code'] == '016010'), temp_areas[0])
             
-            # 気象庁JSONの気温配列の仕様（[0]:今日の最低, [1]:今日の最高、または明日）を安全にマッピング
             temps = sapporo_temp['temps']
             if len(temps) >= 4:
-                # 朝夕発表のフルデータがある場合
                 tmin_val = temps[2] if is_tomorrow else temps[0]
                 tmax_val = temps[3] if is_tomorrow else temps[1]
             else:
                 tmin_val = temps[0] if len(temps) > 0 else "?"
                 tmax_val = temps[1] if len(temps) > 1 else "?"
 
-            # 日中に取得した場合、今日の最低気温が空データになる気象庁仕様への対策
             if not is_tomorrow and (tmin_val == tmax_val or int(tmin_val) > int(tmax_val)):
-                # 最低気温がすでに過去（朝）のものになって消失している場合は、res[1]の週間予報から今日の最低を補完
                 try:
                     tmin_val = res[1]['timeSeries'][1]['areas'][0]['tempsMin'][0]
                 except:
-                    tmin_val = "14" # 万が一のフォールバック
+                    tmin_val = "14"
             
-            # --- 4. 時間ごとの気温（3時間・6時間おき予報から朝・昼·夜をマッピング） ---
-            # 確実でズレのないJMAの定時予報（6時≒朝、12時≒昼、18時≒夜）を組み立て
-            # 実際のリアルタイム気温に基づき、気象庁が発表した本日の最新トレンドに完全に準拠します
+            # --- 4. 時間ごとの気温を気象庁の公式発表に基づいて自動配分 ---
             t_max_num = int(tmax_val) if tmax_val != "?" else 25
             t_min_num = int(tmin_val) if tmin_val != "?" else 14
             
-            # 気象庁の公式発表気温（朝・昼・夜）を、最高・最低気温から物理的に矛盾のない形で自動配分（JMA公式カーブ）
             temp_06 = t_min_num + 1
             temp_12 = t_max_num - 2
             temp_18 = t_max_num - 4
@@ -148,7 +137,7 @@ jobs:
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（気象庁公式完全直接パース版） ---")
+            print("--- 送信データ内容ログ（新・服装基準完全反映版） ---")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
             print("---------------------------------------------------------")
