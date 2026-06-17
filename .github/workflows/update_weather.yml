@@ -1,4 +1,4 @@
-name: Update Weather and Clothing for Quote/0 V2
+name: Update Weather and Clothing for Dot V2
 
 on:
   schedule:
@@ -28,14 +28,15 @@ jobs:
       run: |
         python - << 'EOF'
         import os
+        import json
         import requests
         from datetime import datetime, timedelta, timezone
 
         API_KEY = os.environ.get("QUOTE0_API_KEY")
         DEVICE_ID = os.environ.get("QUOTE0_DEVICE_ID")
 
-        # 1. 札幌の座標（エラー原因だった &models=jma を削除した確実なURL）
-        OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast?latitude=43.0621&longitude=141.3544&hourly=temperature_2m,precipitation_probability,weather_code&timezone=Asia%2FTokyo"
+        # 1. 札幌市中央区の座標（Open-Meteo API）
+        OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast?latitude=43.0553&longitude=141.3409&hourly=temperature_2m,precipitation_probability,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo"
         
         # Dot. APIエンドポイントURL
         DOT_API_URL = f"https://dot.mindreset.tech/api/authV2/open/device/{DEVICE_ID}/text"
@@ -65,12 +66,19 @@ jobs:
             response_weather = requests.get(OPEN_METEO_URL)
             res = response_weather.json()
             
-            # APIエラーチェック（hourlyがない場合は詳細をログに出す）
-            if 'hourly' not in res:
+            if 'hourly' not in res or 'daily' not in res:
                 print(f"Open-Meteo APIエラーレスポンス: {res}")
                 exit(1)
                 
             hourly = res['hourly']
+            daily = res['daily']
+            
+            # 最高気温・最低気温の取得と整数化
+            max_temp_today = round(daily['temperature_2m_max'][0])
+            min_temp_today = round(daily['temperature_2m_min'][0])
+            
+            # 【ご指定のタイトル形式に修正】
+            title_text = f"札幌市中央区 最高:{max_temp_today}℃ 最低:{min_temp_today}℃"
             
             jst = timezone(timedelta(hours=9))
             now = datetime.now(jst)
@@ -84,31 +92,31 @@ jobs:
             for idx in target_indices:
                 if idx < len(times):
                     t = times[idx].strftime("%H:%M")
-                    temp_val = hourly['temperature_2m'][idx]
+                    raw_temp = hourly['temperature_2m'][idx]
                     prob_val = hourly['precipitation_probability'][idx]
                     code = hourly['weather_code'][idx]
                     
                     emoji = get_weather_emoji(code)
-                    clothing = get_clothing_advice(temp_val)
+                    clothing = get_clothing_advice(raw_temp)
                     
-                    # 文字列として成形
-                    temp_str = f"{temp_val}°C"
+                    # 気温の四捨五入（整数化）
+                    temp_int = round(raw_temp)
+                    
+                    # 右寄せ用に文字幅を揃えて成形
+                    temp_str = f"{temp_int}°C"
                     prob_str = f"{prob_val}%"
                     
-                    # 【確実な右寄せ処理】
-                    # rjust を使って指定文字数に満たない分、確実に左側に半角スペースを詰めます
-                    temp_aligned = temp_str.rjust(7)
+                    temp_aligned = temp_str.rjust(5)
                     prob_aligned = prob_str.rjust(4)
                     
-                    # 1行を組み立て (時刻 絵文字 気温 降水確率 服装)
                     forecast_lines.append(f"{t} {emoji} {temp_aligned} {prob_aligned} {clothing}")
             
-            # 文字列リテラル内での改行を保持するため「\\n」で結合
-            weather_message = "\\n".join(forecast_lines)
+            # 通常の改行文字で結合
+            weather_message = "\n".join(forecast_lines)
             
             print("--- 送信データ内容ログ ---")
-            print(f"Title  : 札幌市")
-            print(f"Message:\n{weather_message.replace('\\n', '\n')}")
+            print(f"Title  : {title_text}")
+            print(f"Message:\n{weather_message}")
             print("------------------------")
 
             # 2. Dot. APIへ送信するヘッダーとパラメータ
@@ -119,11 +127,10 @@ jobs:
             
             payload = {
                 "refreshNow": True,
-                "title": "札幌市",
-                "message": weather_message
+                "title": title_text,       # 修正したタイトル
+                "message": weather_message # 予報テキスト本文
             }
             
-            # APIリクエストの送信
             response = requests.post(DOT_API_URL, headers=headers, json=payload)
             
             if response.status_code in [200, 201]:
