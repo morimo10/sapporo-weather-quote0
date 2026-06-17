@@ -1,4 +1,4 @@
-name: Update Weather and Clothing for Dot V2 (Yahoo Weather Robust)
+name: Update Weather and Clothing for Dot V2 (Yahoo Weather Final)
 
 on:
   schedule:
@@ -36,7 +36,7 @@ jobs:
         API_KEY = os.environ.get("QUOTE0_API_KEY")
         DEVICE_ID = os.environ.get("QUOTE0_DEVICE_ID")
 
-        # 1. Yahoo!天気：札幌市中央区のピンポイント予報ページURL
+        # Yahoo!天気：札幌市中央区のピンポイント予報ページURL
         YAHOO_WEATHER_URL = "https://weather.yahoo.co.jp/weather/jp/1b/1400/1101.html"
         DOT_API_URL = f"https://dot.mindreset.tech/api/authV2/open/device/{DEVICE_ID}/text"
 
@@ -46,7 +46,7 @@ jobs:
             elif "雪" in text: return "❄️"
             elif "雷" in text: return "⚡"
             elif "霧" in text: return "🌫️"
-            return "⛅" # 曇り、くもり、その他はすべてデフォルトで⛅
+            return "⛅"
 
         def get_clothing_advice(temp):
             if temp >= 25: return "半袖シャツ"
@@ -72,34 +72,43 @@ jobs:
             
             title_text = f"札幌市中央区 {max_temp}℃〜{min_temp}℃"
             
-            # --- 【重要】HTML構造に基づく精密なデータ抽出 ---
-            # 「項目名」に惑わされず、セルの持つ固有のフォントクラスからダイレクトに配列を作ります
-            hours_data = [td.text.strip() for td in soup.find_all("td", class_="yjw_item_3hour")]
-            weather_data = [img["alt"].strip() for img in soup.find_all("td", class_="yjw_weather_3hour") if img.find("img")]
-            if not weather_data: # 万が一imgのaltから取れない場合のセーフティ
-                weather_data = [td.text.strip() for td in soup.find_all("td", class_="yjw_weather_3hour")]
+            # --- 【超頑健】テーブル全体の行を上から直球でバラす手法に変更 ---
+            # ページ内で最初に見つかる予報テーブル（＝今日の3時間ごと予報）を狙います
+            weather_table = soup.find("table", class_="yjw_table2")
+            if not weather_table:
+                weather_table = soup.find("div", id="threeHourTimeline").find("table")
+                
+            rows = weather_table.find_all("tr")
+            
+            # 各行のすべての td（マス）から、先頭の見出し文字を取り除いたデータ部分を全取得
+            hours_data = [td.text.strip() for td in rows[0].find_all("td")][1:]
+            
+            # 天気は文字化けを防ぐため、imgタグのalt属性か、無ければテキストから安全に取得
+            weather_data = []
+            for td in rows[1].find_all("td")[1:]:
+                img = td.find("img")
+                weather_data.append(img["alt"].strip() if img and img.has_attr("alt") else td.text.strip())
                 
             temp_data = []
-            for td in soup.find_all("td", class_="yjw_temp_3hour"):
+            for td in rows[2].find_all("td")[1:]:
                 num = "".join(filter(lambda c: c.isdigit() or c == "-", td.text.strip()))
-                if num: temp_data.append(int(num))
+                temp_data.append(int(num) if num else 15)
                 
-            prob_data = [td.text.strip() for td in soup.find_all("td", class_="yjw_precip_3hour")]
+            prob_data = [td.text.strip() for td in rows[3].find_all("td")][1:]
 
-            # 現在時刻に最も近いインデックスの算出
+            # 現在のインデックスを計算
             jst = timezone(timedelta(hours=9))
             current_hour = datetime.now(jst).hour
             time_slots = [0, 3, 6, 9, 12, 15, 18, 21]
             closest_slot = min(time_slots, key=lambda x: abs(x - current_hour))
             current_idx = time_slots.index(closest_slot)
             
-            # 本日のデータ配列（最大8個）を超えないようにスライスガード
             target_indices = [current_idx, current_idx + 1, current_idx + 2]
             forecast_lines = []
             
             for idx in target_indices:
+                # データの長さの範囲内であることを安全確認
                 if idx < len(hours_data) and idx < len(temp_data) and idx < len(weather_data):
-                    # 時間を「XX:00」に整形
                     raw_hour = "".join(filter(str.isdigit, hours_data[idx]))
                     time_str = raw_hour.zfill(2) + ":00"
                     
@@ -120,12 +129,16 @@ jobs:
                     
                     forecast_lines.append(f"{time_str} {emoji} {temp_aligned} {prob_aligned} {clothing}")
             
+            # もし深夜帯などで翌日にまたがり配列が足りなくなった場合の最低限のセーフガード
+            if not forecast_lines:
+                forecast_lines.append("夜間のため本日の予報は終了しました")
+            
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（完全版） ---")
+            print("--- 送信データ内容ログ（テーブル直接解析版） ---")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
-            print("-----------------------------------")
+            print("---------------------------------------------")
 
             headers = {
                 "Authorization": f"Bearer {API_KEY}",
