@@ -1,4 +1,4 @@
-name: Update Weather and Clothing for Dot V2 (Robust Error Handling)
+name: Update Weather and Clothing for Dot V2 (Perfect Title & Spacing)
 
 on:
   schedule:
@@ -47,15 +47,16 @@ jobs:
             elif code in [95, 96, 99]: return "⚡"
             return "⛅"
 
+        # 【確定】文字列の先頭に直接全角スペースを埋め込んで絶対に削らせない
         def get_clothing_advice(temp):
-            if temp is None: return "調整着" # 気温不明時のデフォルト
-            if temp >= 30.0: return "Tシャツ"
-            elif temp >= 25.0: return "半袖"
-            elif temp >= 20.0: return "長袖"
-            elif temp >= 15.0: return "セーター"
-            elif temp >= 10.0: return "ジャケット"
-            elif temp >= 5.0: return "コート"
-            else: return "ダウン"
+            if temp is None: return "　調整着"
+            if temp >= 30.0: return "　Ｔシャツ"
+            elif temp >= 25.0: return "　半袖"
+            elif temp >= 20.0: return "　長袖"
+            elif temp >= 15.0: return "　セーター"
+            elif temp >= 10.0: return "　ジャケット"
+            elif temp >= 5.0: return "　コート"
+            else: return "　ダウン"
 
         try:
             response_weather = requests.get(OPEN_METEO_URL)
@@ -75,24 +76,20 @@ jobs:
             d_max = daily.get('temperature_2m_max_jma_seamless', daily.get('temperature_2m_max', []))
             d_min = daily.get('temperature_2m_min_jma_seamless', daily.get('temperature_2m_min', []))
             
-            # --- 【修正】最高・最低気温のデータ不明（None）チェック ---
             max_val = d_max[0] if d_max and len(d_max) > 0 else None
             min_val = d_min[0] if d_min and len(d_min) > 0 else None
             
-            max_str = f"{round(max_val)}℃" if max_val is not None else "?℃"
-            min_str = f"{round(min_val)}℃" if min_val is not None else "?℃"
+            max_str = f"{round(max_val)}" if max_val is not None else "?"
+            min_str = f"{round(min_val)}" if min_val is not None else "?"
             
-            title_text = f"札幌市中央区 {max_str}〜{min_str}"
+            # 【修正】地域名は残し、真ん中の「℃」を取り除いて「xx〜xx℃」の形に
+            title_text = f"札幌市中央区 {max_str}〜{min_str}℃"
             
             jst = timezone(timedelta(hours=9))
             now = datetime.now(jst)
             
             times = [datetime.fromisoformat(t).replace(tzinfo=jst) for t in hourly.get('time', [])]
             
-            if not times:
-                print("時間データが空です")
-                exit(1)
-
             base_hour = now.hour if now.hour % 2 == 0 else now.hour - 1
             if base_hour < 0: base_hour = 0
             
@@ -114,17 +111,14 @@ jobs:
                 raw_prob = h_prob[idx] if idx < len(h_prob) else None
                 raw_code = h_code[idx] if idx < len(h_code) else None
                 
-                # --- 【修正】時系列データのデータ不明（None）チェック ---
-                # 気温の判定
                 if raw_temp is not None:
                     temp_num = round(raw_temp)
                     temp_display = f"{temp_num}°C"
-                    clothing_raw = get_clothing_advice(temp_num)
+                    clothing = get_clothing_advice(temp_num)
                 else:
                     temp_display = "?°C"
-                    clothing_raw = get_clothing_advice(None)
+                    clothing = get_clothing_advice(None)
                 
-                # 降水確率の判定
                 if raw_prob is not None:
                     prob_num = int(raw_prob)
                     prob_display = f"{prob_num}%"
@@ -132,17 +126,15 @@ jobs:
                     prob_display = "?%"
                 
                 emoji = get_weather_emoji(raw_code)
-                clothing = f"　{clothing_raw}"
                 
-                # 等幅フォントでガタつかないように文字幅を「?」も含めて整える
                 temp_aligned = temp_display.rjust(5)
                 prob_aligned = prob_display.rjust(4)
                 
-                forecast_lines.append(f"{t_str} {emoji} {temp_aligned} {prob_aligned} {clothing}")
+                forecast_lines.append(f"{t_str} {emoji} {temp_aligned} {prob_aligned}{clothing}")
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（不明データ対策・全角空白版） ---")
+            print("--- 送信データ内容ログ（完璧タイトル＆スペース直入れ版） ---")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
             print("---------------------------------------------------------")
