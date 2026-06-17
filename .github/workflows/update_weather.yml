@@ -1,4 +1,4 @@
-name: Update Weather and Clothing for Dot V2 (Yahoo Fixed Final)
+name: Update Weather and Clothing for Dot V2 (Yahoo Simple Array)
 
 on:
   schedule:
@@ -31,7 +31,6 @@ jobs:
         import json
         import requests
         from bs4 import BeautifulSoup
-        from datetime import datetime, timedelta, timezone
 
         API_KEY = os.environ.get("QUOTE0_API_KEY")
         DEVICE_ID = os.environ.get("QUOTE0_DEVICE_ID")
@@ -91,7 +90,7 @@ jobs:
                 tds = tr.find_all("td")[1:]
                 
                 if "時間" in header_text:
-                    hours_data = [int("".join(filter(str.isdigit, td.text.strip()))) for td in tds if "".join(filter(str.isdigit, td.text.strip())).isdigit()]
+                    hours_data = [td.text.strip().replace("\n", "") for td in tds]
                 elif "天気" in header_text:
                     for td in tds:
                         img = td.find("img")
@@ -103,48 +102,37 @@ jobs:
                 elif "降水" in header_text:
                     prob_data = [td.text.strip() for td in tds]
 
-            # --- 【修正】現在時刻から、表示すべき「最初のマスの位置」を自動検索 ---
-            jst = timezone(timedelta(hours=9))
-            current_hour = datetime.now(jst).hour
-            
-            # Yahoo天気の残っている時間（例：[12, 15, 18, 21] など）から、今に一番近いものを探す
-            start_idx = 0
-            if hours_data:
-                # 現在時刻以上の時間、または最後のマスをベースにする
-                closest_hour = min(hours_data, key=lambda x: abs(x - current_hour))
-                start_idx = hours_data.index(closest_hour)
-            
-            # 見つけた位置から、3回分のデータを取得
-            target_indices = [start_idx, start_idx + 1, start_idx + 2]
+            # --- 【超確実】時刻計算をせず、表に残っている先頭（直近の未来）から3つをそのまま取得 ---
             forecast_lines = []
+            # 取得できる最大数は、表に残っているコマ数（通常4〜8コマ）か、3コマのどちらか小さい方
+            max_available = min(len(hours_data), len(temp_data), len(weather_data), len(prob_data), 3)
             
-            for idx in target_indices:
-                if idx < len(hours_data) and idx < len(temp_data) and idx < len(weather_data) and idx < len(prob_data):
-                    time_str = str(hours_data[idx]).zfill(2) + ":00"
-                    
-                    weather_text = weather_data[idx]
-                    temp_val = temp_data[idx]
-                    prob_val = prob_data[idx]
-                    
-                    if "%" not in prob_val:
-                        prob_val = f"{prob_val}%"
-                    
-                    emoji = get_weather_emoji(weather_text)
-                    clothing = get_clothing_advice(temp_val)
-                    
-                    temp_str = f"{temp_val}°C"
-                    temp_aligned = temp_str.rjust(5)
-                    prob_aligned = prob_val.rjust(4)
-                    
-                    forecast_lines.append(f"{time_str} {emoji} {temp_aligned} {prob_aligned} {clothing}")
+            for idx in range(max_available):
+                raw_hour = "".join(filter(str.isdigit, hours_data[idx]))
+                time_str = raw_hour.zfill(2) + ":00"
+                
+                weather_text = weather_data[idx]
+                temp_val = temp_data[idx]
+                prob_val = prob_data[idx]
+                
+                if "%" not in prob_val:
+                    prob_val = f"{prob_val}%"
+                
+                emoji = get_weather_emoji(weather_text)
+                clothing = get_clothing_advice(temp_val)
+                
+                temp_str = f"{temp_val}°C"
+                temp_aligned = temp_str.rjust(5)
+                prob_aligned = prob_val.rjust(4)
+                
+                forecast_lines.append(f"{time_str} {emoji} {temp_aligned} {prob_aligned} {clothing}")
             
-            # 万が一夜遅すぎて翌日のデータがなく配列が足りない時だけのセーフティ
             if not forecast_lines:
                 forecast_lines.append("本日の予報は終了しました")
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（時間変動対応版） ---")
+            print("--- 送信データ内容ログ（シンプル配列版） ---")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
             print("------------------------------------------")
