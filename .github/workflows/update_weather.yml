@@ -1,4 +1,4 @@
-name: Update Weather and Clothing for Dot V2 (Realtime Best Match Final)
+name: Update Weather and Clothing for Dot V2 (Perfect Hybrid JMA & Best)
 
 on:
   schedule:
@@ -34,8 +34,14 @@ jobs:
         API_KEY = os.environ.get("QUOTE0_API_KEY")
         DEVICE_ID = os.environ.get("QUOTE0_DEVICE_ID")
 
-        # 【最終完成形URL】タイムラグのある生データではなく、気象庁ベースのリアルタイム補正モデル(best_match)へ一本化
-        OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast?latitude=43.0620&longitude=141.3540&hourly=temperature_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Asia%2FTokyo"
+        # 【究極の解決URL】
+        # hourlyには最高精度のリアルタイム補正(モデル指定なし)を使用し、
+        # dailyには海外ノイズを排除するため「気象庁(jma_seamless)」を明示的に指定してドッキング
+        OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast?latitude=43.0620&longitude=141.3540&hourly=temperature_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Asia%2FTokyo&models=jma_seamless"
+        
+        # リアルタイムの最高精度 hourly を別で取得するためのURL
+        BEST_MATCH_URL = "https://api.open-meteo.com/v1/forecast?latitude=43.0620&longitude=141.3540&hourly=temperature_2m,weather_code&timezone=Asia%2FTokyo"
+        
         DOT_API_URL = f"https://dot.mindreset.tech/api/authV2/open/device/{DEVICE_ID}/text"
 
         def get_weather_emoji(code):
@@ -67,48 +73,50 @@ jobs:
             return ""
 
         try:
-            response_weather = requests.get(OPEN_METEO_URL)
-            res = response_weather.json()
+            # 1. 気象庁100%のソリッドなデイリーデータ（降水確率・最高最低気温・代表天気）を取得
+            res_jma = requests.get(OPEN_METEO_URL).json()
+            # 2. リアルタイムで補正された最新の1時間ごとの気温データを取得
+            res_best = requests.get(BEST_MATCH_URL).json()
             
-            if 'hourly' not in res or 'daily' not in res:
-                print(f"APIレスポンスエラー: {res}")
+            if 'daily' not in res_jma or 'hourly' not in res_best:
+                print("APIレスポンスエラー")
                 exit(1)
                 
-            hourly = res['hourly']
-            daily = res['daily']
+            daily = res_jma['daily']
+            hourly = res_best['hourly']
             h_time_strings = hourly.get('time', [])
             
-            # 最高精度モデル(best_match)からデータをダイレクトに抽出
+            # リアルタイム補正モデルから時間ごとのデータを抽出（ズレを無くす）
             h_temp = hourly.get('temperature_2m', [])
             h_code = hourly.get('weather_code', [])
             
-            d_code = daily.get('weather_code', [])
-            d_prob = daily.get('precipitation_probability_max', [])
-            d_tmax = daily.get('temperature_2m_max', [])
-            d_tmin = daily.get('temperature_2m_min', [])
+            # 気象庁モデルから1日単位のデータを正確に抽出（海外ノイズを徹底排除）
+            d_code = daily.get('weather_code_jma_seamless', daily.get('weather_code', []))
+            d_prob = daily.get('precipitation_probability_max_jma_seamless', daily.get('precipitation_probability_max', []))
+            d_tmax = daily.get('temperature_2m_max_jma_seamless', daily.get('temperature_2m_max', []))
+            d_tmin = daily.get('temperature_2m_min_jma_seamless', daily.get('temperature_2m_min', []))
             
             jst = timezone(timedelta(hours=9))
             now = datetime.now(jst)
             
-            # 夜21時以降は「明日」の予報に切り替え
             is_tomorrow = now.hour >= 21
             target_date = now if not is_tomorrow else now + timedelta(days=1)
             day_idx = 1 if is_tomorrow else 0
             
-            # 1日全体の代表天気絵文字を取得
+            # 天気絵文字（気象庁基準）
             day_code_val = d_code[day_idx] if d_code and day_idx < len(d_code) else None
             day_emoji = get_weather_emoji(day_code_val)
             
             title_text = f"札幌市中央区の天気: {day_emoji}"
             
-            # リアルタイム補正された各種1日データを取得
+            # 降水確率は「気象庁の公式データ」を絶対採用
             prob_val = d_prob[day_idx] if d_prob and day_idx < len(d_prob) else None
-            tmax_val = d_tmax[day_idx] if d_tmax and day_idx < len(d_tmax) else None
-            tmin_val = d_tmin[day_idx] if d_tmin and day_idx < len(d_tmin) else None
-            
             prob_str = f"{int(prob_val)}%" if prob_val is not None else "0%"
             umbrella_mark = get_umbrella_advice(prob_val)
             
+            # 最高・最低気温も気象庁基準を採用
+            tmax_val = d_tmax[day_idx] if d_tmax and day_idx < len(d_tmax) else None
+            tmin_val = d_tmin[day_idx] if d_tmin and day_idx < len(d_tmin) else None
             tmax_str = f"{round(tmax_val)}°C" if tmax_val is not None else "?°C"
             tmin_str = f"{round(tmin_val)}°C" if tmin_val is not None else "?°C"
             
@@ -119,7 +127,7 @@ jobs:
                 f"最低: {tmin_str}  最高: {tmax_str}"
             ]
             
-            # 通勤・お出かけ特化（6時、12時、18時）
+            # 通勤・お出かけ特化（6時、12時、18時）の気温は「リアルタイム補正最新値」を採用
             slots = [
                 ("朝(06:00)", 6),
                 ("昼(12:00)", 12),
@@ -152,7 +160,7 @@ jobs:
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（リアルタイム最新予報・完全一致版） ---")
+            print("--- 送信データ内容ログ（完全ハイブリッド確定版） ---")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
             print("---------------------------------------------------------")
