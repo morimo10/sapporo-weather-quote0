@@ -55,7 +55,7 @@ jobs:
             if temp >= 30: return " Ｔシャツ"
             elif temp >= 25: return " 半袖シャツ"
             elif temp >= 20: return " 長袖シャツ"
-            elif temp >= 15: return " 薄手ジャケット"
+            elif temp >= 15: return " ジャケット"
             elif temp >= 10: return " コート"
             else: return " ダウン"
 
