@@ -77,8 +77,8 @@ jobs:
             max_temp_today = round(daily['temperature_2m_max'][0])
             min_temp_today = round(daily['temperature_2m_min'][0])
             
-            # 【ご指定のタイトル形式に修正】
-            title_text = f"札幌市中央区 最高:{max_temp_today}℃ 最低:{min_temp_today}℃"
+            # 【文字切れ対策：幅に収まるよう「XX℃〜XX℃」形式に短縮】
+            title_text = f"札幌市中央区 {max_temp_today}℃〜{min_temp_today}℃"
             
             jst = timezone(timedelta(hours=9))
             now = datetime.now(jst)
@@ -127,7 +127,7 @@ jobs:
             
             payload = {
                 "refreshNow": True,
-                "title": title_text,       # 修正したタイトル
+                "title": title_text,       # 短縮したタイトル
                 "message": weather_message # 予報テキスト本文
             }
             
