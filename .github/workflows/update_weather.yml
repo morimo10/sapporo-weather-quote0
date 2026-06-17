@@ -1,4 +1,4 @@
-name: Update Weather and Clothing for Dot V2 (Pure Clean Version)
+name: Update Weather and Clothing for Dot V2 (Morning, Day, Night)
 
 on:
   schedule:
@@ -34,9 +34,8 @@ jobs:
         API_KEY = os.environ.get("QUOTE0_API_KEY")
         DEVICE_ID = os.environ.get("QUOTE0_DEVICE_ID")
 
-        # 【原点回帰】バグの原因になるモデル指定をすべて排除。
-        # 最も安定し、データが絶対に途切れないOpen-Meteoの標準高精度URLに一本化します。
-        OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast?latitude=43.0620&longitude=141.3540&hourly=temperature_2m,precipitation_probability,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo"
+        # 気象庁モデルの1時間ごとの細かなデータをリクエスト（ここから朝・昼・夜を抽出します）
+        OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast?latitude=43.0620&longitude=141.3540&hourly=temperature_2m,precipitation_probability,weather_code&timezone=Asia%2FTokyo&models=jma_seamless"
         DOT_API_URL = f"https://dot.mindreset.tech/api/authV2/open/device/{DEVICE_ID}/text"
 
         def get_weather_emoji(code):
@@ -63,57 +62,52 @@ jobs:
             response_weather = requests.get(OPEN_METEO_URL)
             res = response_weather.json()
             
-            if 'hourly' not in res or 'daily' not in res:
+            if 'hourly' not in res:
                 print(f"APIレスポンスエラー: {res}")
                 exit(1)
                 
             hourly = res['hourly']
-            daily = res['daily']
-            
             h_time_strings = hourly.get('time', [])
-            h_temp = hourly.get('temperature_2m', [])
-            h_prob = hourly.get('precipitation_probability', [])
-            h_code = hourly.get('weather_code', [])
             
-            d_max = daily.get('temperature_2m_max', [])
-            d_min = daily.get('temperature_2m_min', [])
+            # キー名バグを防ぐため安全にデータを取得
+            h_temp = hourly.get('temperature_2m_jma_seamless', hourly.get('temperature_2m', []))
+            h_prob = hourly.get('precipitation_probability_jma_seamless', hourly.get('precipitation_probability', []))
+            h_code = hourly.get('weather_code_jma_seamless', hourly.get('weather_code', []))
             
-            max_val = d_max[0] if d_max and len(d_max) > 0 else None
-            min_val = d_min[0] if d_min and len(d_min) > 0 else None
-            
-            max_str = f"{round(max_val)}" if max_val is not None else "?"
-            min_str = f"{round(min_val)}" if min_val is not None else "?"
-            
-            title_text = f"札幌市中央区 {max_str}〜{min_str}℃"
+            # 【修正】タイトルから気温をカットし、地域名のみにスッキリ変更
+            title_text = "札幌市中央区の天気"
             
             jst = timezone(timedelta(hours=9))
             now = datetime.now(jst)
             
-            base_hour = now.hour if now.hour % 2 == 0 else now.hour - 1
-            start_time = now.replace(hour=base_hour, minute=0, second=0, microsecond=0)
-            if now - start_time > timedelta(hours=1, minutes=30):
-                start_time += timedelta(hours=2)
+            # もし夜21時を過ぎていたら、実質「明日」のデータを表示させた方が役立つためターゲット日を明日にシフト
+            target_date = now if now.hour < 21 else now + timedelta(days=1)
+            
+            # 抽出したい「朝・昼・夜」の固定時間（JMAデータが確実に存在する時間帯）
+            slots = [
+                ("朝(08:00)", 8),
+                ("昼(14:00)", 14),
+                ("夜(20:00)", 20)
+            ]
             
             forecast_lines = []
             
-            for i in range(5):
-                target_dt = start_time + timedelta(hours=i * 2)
+            for label, hour in slots:
+                # 検索用文字列の作成 (例: "2026-06-17T08:00")
+                target_dt = target_date.replace(hour=hour, minute=0, second=0, microsecond=0)
                 target_time_str = target_dt.strftime("%Y-%m-%dT%H:%M")
-                display_time_str = target_dt.strftime("%H:%M")
                 
-                # 時間文字列の完全一致検索
+                # インデックスの完全一致検索
                 idx = -1
                 if target_time_str in h_time_strings:
                     idx = h_time_strings.index(target_time_str)
-                if idx == -1:
-                    times_parsed = [datetime.fromisoformat(t).replace(tzinfo=jst) for t in h_time_strings]
-                    idx = min(range(len(times_parsed)), key=lambda k: abs(times_parsed[k] - target_dt.replace(tzinfo=jst)))
                 
-                raw_temp = h_temp[idx] if idx < len(h_temp) else None
-                raw_prob = h_prob[idx] if idx < len(h_prob) else None
-                raw_code = h_code[idx] if idx < len(h_code) else None
+                # データの抽出と安全なフォールバック
+                raw_temp = h_temp[idx] if (idx != -1 and idx < len(h_temp)) else None
+                raw_prob = h_prob[idx] if (idx != -1 and idx < len(h_prob)) else None
+                raw_code = h_code[idx] if (idx != -1 and idx < len(h_code)) else None
                 
-                # 気温と服装
+                # 気温と服装のパース
                 if raw_temp is not None:
                     temp_num = round(raw_temp)
                     temp_display = f"{temp_num}°C"
@@ -122,7 +116,7 @@ jobs:
                     temp_display = "?°C"
                     clothing = get_clothing_advice(None)
                 
-                # 降水確率（標準URLなので確実にデータが入ります）
+                # 降水確率のパース
                 if raw_prob is not None:
                     prob_num = int(raw_prob)
                     prob_display = f"{prob_num}%"
@@ -134,11 +128,11 @@ jobs:
                 temp_aligned = temp_display.rjust(5)
                 prob_aligned = prob_display.rjust(4)
                 
-                forecast_lines.append(f"{display_time_str} {emoji} {temp_aligned} {prob_aligned}{clothing}")
+                forecast_lines.append(f"{label} {emoji} {temp_aligned} {prob_aligned}{clothing}")
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（完全正常化・確定版） ---")
+            print("--- 送信データ内容ログ（朝昼夜・3区分固定予報版） ---")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
             print("---------------------------------------------------------")
