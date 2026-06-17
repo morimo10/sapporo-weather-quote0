@@ -35,14 +35,14 @@ jobs:
         API_KEY = os.environ.get("QUOTE0_API_KEY")
         DEVICE_ID = os.environ.get("QUOTE0_DEVICE_ID")
 
-        # 1. 札幌市中央区の座標 ＋ 気象庁MSMモデル（models=jma_msm）を強制指定
+        # 1. 札幌市中央区の座標 ＋ 気象庁MSMモデル
         OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast?latitude=43.0553&longitude=141.3409&hourly=temperature_2m,precipitation_probability,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo&models=jma_msm"
         
         # Dot. APIエンドポイントURL
         DOT_API_URL = f"https://dot.mindreset.tech/api/authV2/open/device/{DEVICE_ID}/text"
 
-        # 天気コード（WMO）を絵文字にマッピング
         def get_weather_emoji(code):
+            if code is None: return "⛅"
             if code == 0: return "☀️"
             elif code in [1, 2, 3]: return "⛅"
             elif code in [45, 48]: return "🌫️"
@@ -51,8 +51,8 @@ jobs:
             elif code in [95, 96, 99]: return "⚡"
             return "❓"
 
-        # 気温に応じた衣類・服装情報の判定ロジック
         def get_clothing_advice(temp):
+            if temp is None: return "長袖シャツ"
             if temp >= 25.0: return "半袖シャツ"
             elif temp >= 20.0: return "長袖シャツ"
             elif temp >= 16.0: return "カーディガン"
@@ -62,11 +62,9 @@ jobs:
             else: return "ダウンコート"
 
         try:
-            # 天気データの取得
             response_weather = requests.get(OPEN_METEO_URL)
             res = response_weather.json()
             
-            # APIエラーチェック（jma_msm指定時は、指定モデルのキー内にデータが入るため柔軟に取得します）
             if 'hourly' not in res or 'daily' not in res:
                 print(f"Open-Meteo APIエラーレスポンス: {res}")
                 exit(1)
@@ -74,11 +72,12 @@ jobs:
             hourly = res['hourly']
             daily = res['daily']
             
-            # 最高気温・最低気温の取得と整数化
-            max_temp_today = round(daily['temperature_2m_max'][0])
-            min_temp_today = round(daily['temperature_2m_min'][0])
+            # 最高気温・最低気温の取得（Noneの場合は暫定値）
+            max_temp_val = daily['temperature_2m_max'][0] if daily['temperature_2m_max'][0] is not None else 20
+            min_temp_val = daily['temperature_2m_min'][0] if daily['temperature_2m_min'][0] is not None else 10
+            max_temp_today = round(max_temp_val)
+            min_temp_today = round(min_temp_val)
             
-            # タイトル形式（短縮版）
             title_text = f"札幌市中央区 {max_temp_today}℃〜{min_temp_today}℃"
             
             jst = timezone(timedelta(hours=9))
@@ -87,7 +86,6 @@ jobs:
             times = [datetime.fromisoformat(t).replace(tzinfo=jst) for t in hourly['time']]
             current_idx = min(range(len(times)), key=lambda i: abs(times[i] - now))
             
-            # 3時間ごと（現在、3時間後、6時間後）のインデックスを指定
             target_indices = [current_idx, current_idx + 3, current_idx + 6]
             
             forecast_lines = []
@@ -95,15 +93,22 @@ jobs:
             for idx in target_indices:
                 if idx < len(times):
                     t = times[idx].strftime("%H:%M")
-                    raw_temp = hourly['temperature_2m'][idx]
-                    prob_val = hourly['precipitation_probability'][idx]
-                    code = hourly['weather_code'][idx]
                     
-                    emoji = get_weather_emoji(code)
-                    clothing = get_clothing_advice(raw_temp)
+                    raw_temp = hourly['temperature_2m'][idx]
+                    raw_prob = hourly['precipitation_probability'][idx]
+                    raw_code = hourly['weather_code'][idx]
+                    
+                    # 【None対策（セーフティガード）】
+                    # もし気象庁MSMの計算がまだ届いておらず None（空）だった場合は、暫定的に 0 を代入する
+                    temp_val = raw_temp if raw_temp is not None else 15.0
+                    prob_val = raw_prob if raw_prob is not None else 0
+                    code_val = raw_code if raw_code is not None else 0
+                    
+                    emoji = get_weather_emoji(code_val)
+                    clothing = get_clothing_advice(temp_val)
                     
                     # 気温の四捨五入（整数化）
-                    temp_int = round(raw_temp)
+                    temp_int = round(temp_val)
                     
                     # 右寄せ用に文字幅を揃えて成形
                     temp_str = f"{temp_int}°C"
@@ -114,15 +119,13 @@ jobs:
                     
                     forecast_lines.append(f"{t} {emoji} {temp_aligned} {prob_aligned} {clothing}")
             
-            # 通常の改行文字で結合
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（気象庁MSMモデル） ---")
+            print("--- 送信データ内容ログ（None対策版） ---")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
-            print("------------------------------------------")
+            print("--------------------------------------")
 
-            # 2. Dot. APIへ送信するヘッダーとパラメータ
             headers = {
                 "Authorization": f"Bearer {API_KEY}",
                 "Content-Type": "application/json"
