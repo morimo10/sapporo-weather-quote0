@@ -1,4 +1,4 @@
-name: Update Weather and Clothing for Dot V2 (Pure Data & Fixed Spacing)
+name: Update Weather and Clothing for Dot V2 (Robust Error Handling)
 
 on:
   schedule:
@@ -34,11 +34,11 @@ jobs:
         API_KEY = os.environ.get("QUOTE0_API_KEY")
         DEVICE_ID = os.environ.get("QUOTE0_DEVICE_ID")
 
-        # 札幌市中央区中心部（テレビ塔）座標 ＋ 気象庁シームレスモデル
         OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast?latitude=43.0620&longitude=141.3540&hourly=temperature_2m,precipitation_probability,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo&models=jma_seamless"
         DOT_API_URL = f"https://dot.mindreset.tech/api/authV2/open/device/{DEVICE_ID}/text"
 
         def get_weather_emoji(code):
+            if code is None: return "⛅"
             if code == 0: return "☀️"
             elif code in [1, 2, 3]: return "⛅"
             elif code in [45, 48]: return "🌫️"
@@ -48,6 +48,7 @@ jobs:
             return "⛅"
 
         def get_clothing_advice(temp):
+            if temp is None: return "調整着" # 気温不明時のデフォルト
             if temp >= 30.0: return "Tシャツ"
             elif temp >= 25.0: return "半袖"
             elif temp >= 20.0: return "長袖"
@@ -67,26 +68,31 @@ jobs:
             hourly = res['hourly']
             daily = res['daily']
             
-            h_temp = hourly.get('temperature_2m_jma_seamless', hourly.get('temperature_2m'))
-            h_prob = hourly.get('precipitation_probability_jma_seamless', hourly.get('precipitation_probability'))
-            h_code = hourly.get('weather_code_jma_seamless', hourly.get('weather_code'))
+            h_temp = hourly.get('temperature_2m_jma_seamless', hourly.get('temperature_2m', []))
+            h_prob = hourly.get('precipitation_probability_jma_seamless', hourly.get('precipitation_probability', []))
+            h_code = hourly.get('weather_code_jma_seamless', hourly.get('weather_code', []))
             
-            d_max = daily.get('temperature_2m_max_jma_seamless', daily.get('temperature_2m_max'))
-            d_min = daily.get('temperature_2m_min_jma_seamless', daily.get('temperature_2m_min'))
+            d_max = daily.get('temperature_2m_max_jma_seamless', daily.get('temperature_2m_max', []))
+            d_min = daily.get('temperature_2m_min_jma_seamless', daily.get('temperature_2m_min', []))
             
-            # --- 【修正】強制的な固定値（26℃/15℃）や下限ガードレールをすべて完全に排除 ---
-            # APIが返してきた本物の予想最高・最低気温をそのまま採用します
-            max_temp_today = round(d_max[0]) if d_max and d_max[0] is not None else 0
-            min_temp_today = round(d_min[0]) if d_min and d_min[0] is not None else 0
+            # --- 【修正】最高・最低気温のデータ不明（None）チェック ---
+            max_val = d_max[0] if d_max and len(d_max) > 0 else None
+            min_val = d_min[0] if d_min and len(d_min) > 0 else None
             
-            title_text = f"札幌市中央区 {max_temp_today}℃〜{min_temp_today}℃"
+            max_str = f"{round(max_val)}℃" if max_val is not None else "?℃"
+            min_str = f"{round(min_val)}℃" if min_val is not None else "?℃"
+            
+            title_text = f"札幌市中央区 {max_str}〜{min_str}"
             
             jst = timezone(timedelta(hours=9))
             now = datetime.now(jst)
             
-            times = [datetime.fromisoformat(t).replace(tzinfo=jst) for t in hourly['time']]
+            times = [datetime.fromisoformat(t).replace(tzinfo=jst) for t in hourly.get('time', [])]
             
-            # 偶数時間スタート地点決定ロジック
+            if not times:
+                print("時間データが空です")
+                exit(1)
+
             base_hour = now.hour if now.hour % 2 == 0 else now.hour - 1
             if base_hour < 0: base_hour = 0
             
@@ -104,34 +110,39 @@ jobs:
                     target_indices.append((idx, loop_time.strftime("%H:%M")))
             
             for idx, t_str in target_indices:
-                raw_temp = h_temp[idx]
-                raw_prob = h_prob[idx]
-                raw_code = h_code[idx]
+                raw_temp = h_temp[idx] if idx < len(h_temp) else None
+                raw_prob = h_prob[idx] if idx < len(h_prob) else None
+                raw_code = h_code[idx] if idx < len(h_code) else None
                 
-                temp_val = round(raw_temp) if raw_temp is not None else 0
-                prob_val = int(raw_prob) if raw_prob is not None else 0
-                code_val = int(raw_code) if raw_code is not None else 0
+                # --- 【修正】時系列データのデータ不明（None）チェック ---
+                # 気温の判定
+                if raw_temp is not None:
+                    temp_num = round(raw_temp)
+                    temp_display = f"{temp_num}°C"
+                    clothing_raw = get_clothing_advice(temp_num)
+                else:
+                    temp_display = "?°C"
+                    clothing_raw = get_clothing_advice(None)
                 
-                # 特定時間の強制上書きもすべて廃止し、予測された生データのみを信用します
-                emoji = get_weather_emoji(code_val)
-                clothing_raw = get_clothing_advice(temp_val)
+                # 降水確率の判定
+                if raw_prob is not None:
+                    prob_num = int(raw_prob)
+                    prob_display = f"{prob_num}%"
+                else:
+                    prob_display = "?%"
                 
-                # --- 【ご提案の反映】各服装文字の先頭に必ず「全角空白」を一律で追加 ---
+                emoji = get_weather_emoji(raw_code)
                 clothing = f"　{clothing_raw}"
                 
-                # ガタつき防止のための純粋な数字幅揃え
-                prob_str = f"{prob_val}%"
-                prob_aligned = f" {prob_str}" if len(prob_str) == 2 else prob_str
+                # 等幅フォントでガタつかないように文字幅を「?」も含めて整える
+                temp_aligned = temp_display.rjust(5)
+                prob_aligned = prob_display.rjust(4)
                 
-                temp_str = f"{temp_val}°C"
-                temp_aligned = f" {temp_str}" if len(temp_str) == 4 else temp_str
-                
-                # 等幅フォント用フォーマット（服装の前に半角も1つ保険として維持）
                 forecast_lines.append(f"{t_str} {emoji} {temp_aligned} {prob_aligned} {clothing}")
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（100%リアル生データ・全角空白強制版） ---")
+            print("--- 送信データ内容ログ（不明データ対策・全角空白版） ---")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
             print("---------------------------------------------------------")
