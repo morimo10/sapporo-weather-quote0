@@ -1,4 +1,4 @@
-name: Update Weather and Clothing for Dot V2 (Final Custom Clothing)
+name: Update Weather and Clothing for Dot V2 (Fix Spacing)
 
 on:
   schedule:
@@ -34,7 +34,6 @@ jobs:
         API_KEY = os.environ.get("QUOTE0_API_KEY")
         DEVICE_ID = os.environ.get("QUOTE0_DEVICE_ID")
 
-        # 札幌市中央区中心部 ＋ 気象庁シームレスモデル
         OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast?latitude=43.0620&longitude=141.3540&hourly=temperature_2m,precipitation_probability,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo&models=jma_seamless"
         DOT_API_URL = f"https://dot.mindreset.tech/api/authV2/open/device/{DEVICE_ID}/text"
 
@@ -47,15 +46,14 @@ jobs:
             elif code in [95, 96, 99]: return "⚡"
             return "⛅"
 
-        # 【修正】ユーザー指定の新しい服装基準を実装
         def get_clothing_advice(temp):
-            if temp >= 30.0: return "　Ｔシャツ"
-            elif temp >= 25.0: return "　半袖"
-            elif temp >= 20.0: return "　長袖"
-            elif temp >= 15.0: return "　セーター"
-            elif temp >= 10.0: return "　ジャケット"
-            elif temp >= 5.0: return "　コート"
-            else: return "　ダウン"
+            if temp >= 30.0: return "Tシャツ"
+            elif temp >= 25.0: return "半袖"
+            elif temp >= 20.0: return "長袖"
+            elif temp >= 15.0: return "セーター"
+            elif temp >= 10.0: return "ジャケット"
+            elif temp >= 5.0: return "コート"
+            else: return "ダウン"
 
         try:
             response_weather = requests.get(OPEN_METEO_URL)
@@ -88,7 +86,6 @@ jobs:
             
             times = [datetime.fromisoformat(t).replace(tzinfo=jst) for t in hourly['time']]
             
-            # 直近の偶数時間を起点にするロジック
             base_hour = now.hour if now.hour % 2 == 0 else now.hour - 1
             if base_hour < 0: base_hour = 0
             
@@ -122,17 +119,20 @@ jobs:
                 emoji = get_weather_emoji(code_val)
                 clothing = get_clothing_advice(temp_val)
                 
+                # --- 【修正】文字幅の右寄せバランスを変更し、被りを防止 ---
+                # 気温を「4マス幅」、降水確率を「3マス幅」に縮めることで、右側に余裕を持たせます
                 temp_str = f"{temp_val}°C"
                 prob_str = f"{prob_val}%"
-                temp_aligned = temp_str.rjust(5)
-                prob_aligned = prob_str.rjust(4)
                 
-                # 【修正】服装の前に「半角空白」を1つ空けるように成形
-                # forecast_lines.append(f"{t_str} {emoji} {temp_aligned} {prob_aligned} {clothing}")
+                temp_aligned = temp_str.rjust(4)
+                prob_aligned = prob_str.rjust(3)
+                
+                # さらに、降水確率と服装の間にハッキリと「半袖」「長袖」の前の半角スペース（計2マス分）を確保
+                forecast_lines.append(f"{t_str} {emoji} {temp_aligned} {prob_aligned}  {clothing}")
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（新・服装基準2h5行） ---")
+            print("--- 送信データ内容ログ（重なり修正版） ---")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
             print("---------------------------------------------")
