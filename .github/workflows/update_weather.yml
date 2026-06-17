@@ -1,4 +1,4 @@
-name: Update Weather and Clothing for Dot V2 (Fix Probability Backup)
+name: Update Weather and Clothing for Dot V2 (Perfect URL & Probability)
 
 on:
   schedule:
@@ -34,8 +34,8 @@ jobs:
         API_KEY = os.environ.get("QUOTE0_API_KEY")
         DEVICE_ID = os.environ.get("QUOTE0_DEVICE_ID")
 
-        # 気象庁モデル(jma_seamless)に加え、バックアップ用に通常のグローバル予報データも同時に取得
-        OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast?latitude=43.0620&longitude=141.3540&hourly=temperature_2m,precipitation_probability,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo&models=jma_seamless"
+        # 【修正】URLの末尾に「,best_match」を追加。これで気象庁モデル(jma_seamless)と、夜間も途切れない世界標準モデルの両方のデータを1つのJSONで同時に引っ張ってこれるようになります。
+        OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast?latitude=43.0620&longitude=141.3540&hourly=temperature_2m,precipitation_probability,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo&models=jma_seamless,best_match"
         DOT_API_URL = f"https://dot.mindreset.tech/api/authV2/open/device/{DEVICE_ID}/text"
 
         def get_weather_emoji(code):
@@ -69,14 +69,14 @@ jobs:
             hourly = res['hourly']
             daily = res['daily']
             
-            # 各データの取得（気象庁モデル優先、なければ標準モデル）
-            h_temp = hourly.get('temperature_2m_jma_seamless', hourly.get('temperature_2m', []))
+            # 各データの取得（気象庁モデル優先、なければ世界標準ベストマッチモデルから補完）
+            h_temp = hourly.get('temperature_2m_jma_seamless', hourly.get('temperature_2m_best_match', hourly.get('temperature_2m', [])))
             h_prob_jma = hourly.get('precipitation_probability_jma_seamless')
-            h_prob_std = hourly.get('precipitation_probability', [])
-            h_code = hourly.get('weather_code_jma_seamless', hourly.get('weather_code', []))
+            h_prob_std = hourly.get('precipitation_probability_best_match', hourly.get('precipitation_probability', []))
+            h_code = hourly.get('weather_code_jma_seamless', hourly.get('weather_code_best_match', hourly.get('weather_code', [])))
             
-            d_max = daily.get('temperature_2m_max_jma_seamless', daily.get('temperature_2m_max', []))
-            d_min = daily.get('temperature_2m_min_jma_seamless', daily.get('temperature_2m_min', []))
+            d_max = daily.get('temperature_2m_max_jma_seamless', daily.get('temperature_2m_max_best_match', daily.get('temperature_2m_max', [])))
+            d_min = daily.get('temperature_2m_min_jma_seamless', daily.get('temperature_2m_min_best_match', daily.get('temperature_2m_min', [])))
             
             max_val = d_max[0] if d_max and len(d_max) > 0 else None
             min_val = d_min[0] if d_min and len(d_min) > 0 else None
@@ -111,8 +111,7 @@ jobs:
                 raw_temp = h_temp[idx] if idx < len(h_temp) else None
                 raw_code = h_code[idx] if idx < len(h_code) else None
                 
-                # --- 【修正】降水確率のハイブリッド抽出 ---
-                # 気象庁モデルの配列から探し、無効（None）または配列長不足なら標準モデルから取得
+                # 気象庁モデルをチェックし、データがない（None）または夜間で途切れていたら標準モデル(best_match)のデータで上書き補完
                 raw_prob = None
                 if h_prob_jma and idx < len(h_prob_jma):
                     raw_prob = h_prob_jma[idx]
@@ -145,7 +144,7 @@ jobs:
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（降水確率バックアップ搭載版） ---")
+            print("--- 送信データ内容ログ（URLマルチモデル修正版） ---")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
             print("---------------------------------------------------------")
