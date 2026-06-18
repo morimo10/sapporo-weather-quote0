@@ -1,10 +1,10 @@
-name: Update Weather and Clothing for Dot V2 (Pure JMA Robust Morning Fix)
+name: Update Weather and Clothing for Dot V2 (Pure JMA Hourly Eco Version)
 
 on:
   schedule:
-    # 日本時間(JST)の 06:00 から 22:00 までの間、30分ごとに自動実行
-    # （22:30 から翌朝 05:30 までの夜間・早朝は完全にスリープします）
-    - cron: '0,30 21-23,0-12 * * *'
+    # 日本時間(JST)の 06:00 から 22:00 までの間、1時間ごとに自動実行
+    # （23:00 から翌朝 05:00 までの夜間・早朝は完全にスリープします）
+    - cron: '0 21-23,0-12 * * *'
   workflow_dispatch:
 
 jobs:
@@ -107,14 +107,13 @@ jobs:
             prob_str = f"{max_prob}%"
             umbrella_mark = " ☔" if max_prob >= 50 else (" ☂" if max_prob >= 30 else "")
             
-            # --- 3. 最高・最低気温の取得（早朝の空文字トラップ完全ガード） ---
+            # --- 3. 最高・最低気温の取得 ---
             temp_time_series = area_forecast['timeSeries'][2]
             temp_areas = temp_time_series['areas']
             sapporo_temp = next((a for a in temp_areas if a['area']['code'] == '016010'), temp_areas[0])
             
             temps = sapporo_temp['temps']
             
-            # 生データを抽出し、文字型として安全に確保
             tmin_raw = ""
             tmax_raw = ""
             if len(temps) >= 4:
@@ -124,18 +123,15 @@ jobs:
                 tmin_raw = temps[0] if len(temps) > 0 else ""
                 tmax_raw = temps[1] if len(temps) > 1 else ""
 
-            # 気象庁の仕様: 早朝（5時〜11時頃）は今日の最低気温が「空文字 ''」になるため週間予報から補完
             if not is_tomorrow and (not tmin_raw or tmin_raw == tmax_raw):
                 try:
                     tmin_raw = res[1]['timeSeries'][1]['areas'][0]['tempsMin'][0]
                 except:
-                    tmin_raw = "14" # 最終フォールバック
+                    tmin_raw = "14"
             
-            # もし最高気温も空文字ならフォールバック
             if not tmax_raw:
                 tmax_raw = "25"
 
-            # 完全に中身があることを保証してから数値変換（これでエラーを完全回避）
             t_min_num = int(tmin_raw) if tmin_raw.strip() else 14
             t_max_num = int(tmax_raw) if tmax_raw.strip() else 25
             
@@ -157,7 +153,7 @@ jobs:
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（朝方エラー対応版） ---")
+            print("--- 送信データ内容ログ（1時間間隔・エコ版） ---")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
             print("---------------------------------------------------------")
