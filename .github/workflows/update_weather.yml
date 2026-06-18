@@ -73,11 +73,15 @@ jobs:
             res = requests.get(JMA_FORECAST_URL).json()
             area_forecast = res[0]
             
+            # 【重要修正】ここで確実に「日本時間」を生成します
             jst = timezone(timedelta(hours=9))
-            now = datetime.now(jst)
+            now_utc = datetime.now(timezone.utc)
+            now = now_utc.astimezone(jst)
             
-            # 夜21時以降は「明日」のデータへシフト
-            is_tomorrow = now.hour >= 21
+            # 日本時間の「時」を取得して判定（これでJST 21時以降は確実に明日へ）
+            current_hour = now.hour
+            is_tomorrow = current_hour >= 21
+            
             day_idx = 1 if is_tomorrow else 0
             label_head = "明日" if is_tomorrow else "今日"
             
@@ -154,6 +158,7 @@ jobs:
             weather_message = "\n".join(forecast_lines)
             
             print("--- 送信データ内容ログ（1時間間隔・エコ版） ---")
+            print(f"JST Time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
             print("---------------------------------------------------------")
