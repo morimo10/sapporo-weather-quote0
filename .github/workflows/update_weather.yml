@@ -39,16 +39,13 @@ jobs:
         def get_advanced_weather_symbol(text, max_prob):
             if not text: return "☁"
             
-            # 降水確率が30%未満のときは、テキストに関わらず雨マークを完全排除
             if max_prob < 30:
-                if "晴" in text: return "☀"
-                return "☁"
+                text = text.replace("雨", "").replace("雪", "")
             
-            # テキストの言葉の順序から、矢印の移り変わり記号を正確に生成
-            if "晴" in text and "雨" in text:
-                return "☀→☔" if text.find("晴") < text.find("雨") else "☔→☀"
-            elif "晴" in text and "曇" in text:
+            if "晴" in text and "曇" in text:
                 return "☀→☁" if text.find("晴") < text.find("曇") else "☁→☀"
+            elif "晴" in text and "雨" in text:
+                return "☀→☔" if text.find("晴") < text.find("雨") else "☔→☀"
             elif "曇" in text and "雨" in text:
                 return "☁→☔" if text.find("曇") < text.find("雨") else "☔→☁"
             elif "曇" in text and "雪" in text:
@@ -89,7 +86,7 @@ jobs:
             
             day_idx = 1 if is_tomorrow_data else 0
             
-            # --- 1. 降水確率の取得 (確実な安定版から抽出) ---
+            # --- 1. 降水確率の取得 ---
             prob_time_series = area_forecast['timeSeries'][1]
             prob_areas = prob_time_series['areas']
             sapporo_prob = next((a for a in prob_areas if a['area']['code'] == '016010'), prob_areas[0])
@@ -114,9 +111,10 @@ jobs:
             
             weather_text = sapporo_weather['weathers'][day_idx]
             
-            # 安定版のテキストから綺麗な「矢印記号（☁→☔等）」を自ら生成
             day_symbol = get_advanced_weather_symbol(weather_text, max_prob)
-            title_text = f"札幌市中央区の{label_head}: {day_symbol}"
+            
+            # 【ここを修正】「札幌市中央区の」から「札幌の」に変更
+            title_text = f"札幌の{label_head}: {day_symbol}"
             
             # --- 3. 最高・最低気温の取得 ---
             temp_time_series = area_forecast['timeSeries'][2]
@@ -150,7 +148,6 @@ jobs:
             temp_12 = t_max_num - 2
             temp_18 = t_max_num - 4
             
-            # 時間帯ごとのマークにも全体の美しい矢印記号（day_symbol）をバッチリ適用
             forecast_lines = [
                 f"最大降水確率：{prob_str}{umbrella_mark}",
                 f"最低: {tmin_val}°C  最高: {tmax_val}°C",
@@ -161,7 +158,7 @@ jobs:
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（完全復活・安定矢印版） ---")
+            print("--- 送信データ内容ログ（タイトル『札幌の〜』変更版） ---")
             print(f"JST Time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
