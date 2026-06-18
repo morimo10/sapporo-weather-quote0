@@ -39,8 +39,13 @@ jobs:
         JMA_FORECAST_URL = "https://www.jma.go.jp/bosai/forecast/data/forecast/016000.json"
         DOT_API_URL = f"https://dot.mindreset.tech/api/authV2/open/device/{DEVICE_ID}/text"
 
-        def get_weather_symbol(text):
+        def get_weather_symbol(text, max_prob):
             if not text: return "☁"
+            
+            # 【重要修正】降水確率が30%未満なら、テキストに「雨」や「雪」があっても無視して曇りや晴れを優先
+            if max_prob < 30:
+                if "晴" in text: return "☀"
+                return "☁"
             
             if "晴" in text and "雨" in text:
                 return "☀→☔" if text.find("晴") < text.find("雨") else "☔→☀"
@@ -80,9 +85,6 @@ jobs:
             
             current_hour = now.hour
             
-            # 【シンプルに修正】
-            # 純粋に「17時以降〜23時59分まで」の間だけ「明日」のデータを表示する。
-            # 午前0時をまわったら（0時〜16時59分まで）は、すべて「今日」として扱う。
             if 17 <= current_hour <= 23:
                 is_tomorrow_data = True
                 label_head = "明日"
@@ -92,15 +94,7 @@ jobs:
             
             day_idx = 1 if is_tomorrow_data else 0
             
-            # --- 1. 天気記号の取得 ---
-            weather_areas = area_forecast['timeSeries'][0]['areas']
-            sapporo_weather = next((a for a in weather_areas if a['area']['code'] == '016010'), weather_areas[0])
-            
-            weather_text = sapporo_weather['weathers'][day_idx]
-            day_symbol = get_weather_symbol(weather_text)
-            title_text = f"札幌市中央区の{label_head}: {day_symbol}"
-            
-            # --- 2. 降水確率の取得 ---
+            # --- 1. 降水確率の取得（天気の判定で使うため先に計算） ---
             prob_time_series = area_forecast['timeSeries'][1]
             prob_areas = prob_time_series['areas']
             sapporo_prob = next((a for a in prob_areas if a['area']['code'] == '016010'), prob_areas[0])
@@ -108,7 +102,6 @@ jobs:
             prob_pops = sapporo_prob['pops']
             prob_times = prob_time_series['timeDefines']
             
-            # 17:00〜23:59の間だけ日付を+1日して検索ターゲットにする
             if is_tomorrow_data:
                 target_date_str = (now + timedelta(days=1)).strftime("%Y-%m-%d")
             else:
@@ -122,6 +115,15 @@ jobs:
             max_prob = max(day_pops) if day_pops else 0
             prob_str = f"{max_prob}%"
             umbrella_mark = " ☔" if max_prob >= 50 else (" ☂" if max_prob >= 30 else "")
+            
+            # --- 2. 天気記号の取得（確率連動版） ---
+            weather_areas = area_forecast['timeSeries'][0]['areas']
+            sapporo_weather = next((a for a in weather_areas if a['area']['code'] == '016010'), weather_areas[0])
+            
+            weather_text = sapporo_weather['weathers'][day_idx]
+            # 確率(max_prob)を一緒に渡してマークを決める
+            day_symbol = get_weather_symbol(weather_text, max_prob)
+            title_text = f"札幌市中央区の{label_head}: {day_symbol}"
             
             # --- 3. 最高・最低気温の取得 ---
             temp_time_series = area_forecast['timeSeries'][2]
@@ -169,7 +171,7 @@ jobs:
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（0時またぎ即リセット版） ---")
+            print("--- 送信データ内容ログ（確率連動ガード版） ---")
             print(f"JST Time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
