@@ -36,15 +36,31 @@ jobs:
         JMA_FORECAST_URL = "https://www.jma.go.jp/bosai/forecast/data/forecast/016000.json"
         DOT_API_URL = f"https://dot.mindreset.tech/api/authV2/open/device/{DEVICE_ID}/text"
 
-        WEATHER_CODE_MAP = {
-            "100": "☀", "101": "☀→☁", "102": "☀→☔", "103": "☀→☔", "104": "☀→☃", "105": "☀→☃", "106": "☀→☔", "107": "☀→☃", "108": "☀→☔", "110": "☀→☁", "111": "☀→☁", "112": "☀→☔", "113": "☀→☔", "114": "☀→☔", "115": "☀→☃", "116": "☀→☃", "117": "☀→☃", "118": "☀→☔", "119": "☀→⚡", "120": "☀→☔", "121": "☀→☔", "122": "☀→⚡", "123": "☀→⚡", "124": "☀→⚡", "125": "☀→⚡", "126": "☀→☔", "127": "☀→☔", "128": "☀→☔", "130": "朝夕☀", "131": "朝夕☀", "132": "朝夕☀", "140": "☀→☃", "160": "☀→☃", "170": "☀→☃", "181": "☀→☃",
-            "200": "☁", "201": "☁→☀", "202": "☁→☔", "203": "☁→☔", "204": "☁→☃", "205": "☁→☃", "206": "☁→☔", "207": "☁→☃", "208": "☁→☔", "209": "霧", "210": "☁→☀", "211": "☁→☀", "212": "☁→☔", "213": "☁→☔", "214": "☁→☔", "215": "☁→☃", "216": "☁→☃", "217": "☁→☃", "218": "☁→☔", "219": "☁→⚡", "220": "☁→☔", "221": "☁→☔", "222": "☁→⚡", "223": "☁→⚡", "224": "☁→⚡", "225": "☁→⚡", "226": "☁→☔", "228": "☁→☃", "229": "☁→☃", "230": "昼☀", "240": "☁→☃", "250": "☁→☃", "260": "☁→☃", "270": "☁→☃", "281": "☁→☃",
-            "300": "☔", "301": "☔→☀", "302": "☔→☁", "303": "☔", "304": "☔→☃", "306": "☔", "308": "大雨", "309": "一時☔", "311": "☔→☀", "313": "☔→☁", "314": "☔", "315": "☔→☃", "316": "☔", "317": "☔", "320": "☔→☃", "321": "☔→☃", "322": "☔→⚡", "323": "☔→⚡", "324": "☔→⚡", "325": "☔→⚡", "326": "☔→⚡", "327": "☔→⚡", "328": "☔→☃", "329": "☔→☃", "340": "☔→☃", "350": "☔→⚡", "361": "☔→☃", "371": "☔→☃",
-            "400": "☃", "401": "☃→☀", "402": "☃→☁", "403": "☃", "405": "大雪", "406": "☃→☔", "407": "☃→☔", "409": "一時☃", "411": "☃→☀", "413": "☃→☁", "414": "☃", "415": "☃→☔", "420": "☃→☔", "421": "☃→☔", "422": "☃→⚡", "423": "☃→⚡", "425": "☃→⚡", "426": "☃→⚡", "427": "☃→⚡", "430": "☃→☔", "450": "☃→⚡"
-        }
-
-        def get_weather_symbol_by_code(code_str):
-            return WEATHER_CODE_MAP.get(code_str, "☁")
+        def get_advanced_weather_symbol(text, max_prob):
+            if not text: return "☁"
+            
+            # 降水確率が30%未満のときは、テキストに関わらず雨マークを完全排除
+            if max_prob < 30:
+                if "晴" in text: return "☀"
+                return "☁"
+            
+            # テキストの言葉の順序から、矢印の移り変わり記号を正確に生成
+            if "晴" in text and "雨" in text:
+                return "☀→☔" if text.find("晴") < text.find("雨") else "☔→☀"
+            elif "晴" in text and "曇" in text:
+                return "☀→☁" if text.find("晴") < text.find("曇") else "☁→☀"
+            elif "曇" in text and "雨" in text:
+                return "☁→☔" if text.find("曇") < text.find("雨") else "☔→☁"
+            elif "曇" in text and "雪" in text:
+                return "☁→☃" if text.find("曇") < text.find("雪") else "☃→☁"
+            elif "雨" in text and "雪" in text:
+                return "☔→☃" if text.find("雨") < text.find("雪") else "☃→☔"
+            
+            if "晴" in text: return "☀"
+            elif "曇" in text: return "☁"
+            elif "雨" in text: return "☔"
+            elif "雪" in text: return "☃"
+            return "☁"
 
         def get_clothing_advice(temp):
             if temp is None: return " 全着"
@@ -70,15 +86,46 @@ jobs:
             else:
                 is_tomorrow_data = False
                 label_head = "今日"
-                
+            
             day_idx = 1 if is_tomorrow_data else 0
             
-            # --- 1. 気温データの取得 (016010: 石狩空知後志の代表=札幌) ---
-            temp_areas = area_forecast['timeSeries'][2]['areas']
+            # --- 1. 降水確率の取得 (確実な安定版から抽出) ---
+            prob_time_series = area_forecast['timeSeries'][1]
+            prob_areas = prob_time_series['areas']
+            sapporo_prob = next((a for a in prob_areas if a['area']['code'] == '016010'), prob_areas[0])
+            
+            prob_pops = sapporo_prob['pops']
+            prob_times = prob_time_series['timeDefines']
+            
+            target_date_str = (now + timedelta(days=1)).strftime("%Y-%m-%d") if is_tomorrow_data else now.strftime("%Y-%m-%d")
+                
+            day_pops = []
+            for t_str, pop in zip(prob_times, prob_pops):
+                if target_date_str in t_str:
+                    day_pops.append(int(pop))
+            
+            max_prob = max(day_pops) if day_pops else 0
+            prob_str = f"{max_prob}%"
+            umbrella_mark = " ☔" if max_prob >= 50 else (" ☂" if max_prob >= 30 else "")
+            
+            # --- 2. 天気テキストの取得と矢印変換処理 ---
+            weather_areas = area_forecast['timeSeries'][0]['areas']
+            sapporo_weather = next((a for a in weather_areas if a['area']['code'] == '016010'), weather_areas[0])
+            
+            weather_text = sapporo_weather['weathers'][day_idx]
+            
+            # 安定版のテキストから綺麗な「矢印記号（☁→☔等）」を自ら生成
+            day_symbol = get_advanced_weather_symbol(weather_text, max_prob)
+            title_text = f"札幌市中央区の{label_head}: {day_symbol}"
+            
+            # --- 3. 最高・最低気温の取得 ---
+            temp_time_series = area_forecast['timeSeries'][2]
+            temp_areas = temp_time_series['areas']
             sapporo_temp = next((a for a in temp_areas if a['area']['code'] == '016010'), temp_areas[0])
             temps = sapporo_temp['temps']
             
-            tmin_raw, tmax_raw = "", ""
+            tmin_raw = ""
+            tmax_raw = ""
             if len(temps) >= 4:
                 tmin_raw = temps[2] if is_tomorrow_data else temps[0]
                 tmax_raw = temps[3] if is_tomorrow_data else temps[1]
@@ -89,64 +136,32 @@ jobs:
             if not is_tomorrow_data and (not tmin_raw or tmin_raw == tmax_raw):
                 try: tmin_raw = res[1]['timeSeries'][1]['areas'][0]['tempsMin'][0]
                 except: tmin_raw = "14"
+            
             if not tmax_raw: tmax_raw = "25"
 
             t_min_num = int(tmin_raw) if tmin_raw.strip() else 14
             t_max_num = int(tmax_raw) if tmax_raw.strip() else 25
-
-            # --- 2. 時系列予報（timeSeries[3]）から「札幌（14163）」のデータを確実に狙い撃ち ---
-            hourly_series = area_forecast['timeSeries'][3]
-            hourly_areas = hourly_series['areas']
             
-            # 【ここを修正】timeSeries[3]の中での札幌中央区のコードは '14163' になります
-            sapporo_hourly = next((a for a in hourly_areas if a['area']['code'] == '14163'), None)
-            if not sapporo_hourly:
-                # 万が一見つからない場合は一番最初の要素（代表地）をフォールバック
-                sapporo_hourly = hourly_areas[0]
+            tmin_val = str(t_min_num)
+            tmax_val = str(t_max_num)
             
-            target_date_str = (now + timedelta(days=1)).strftime("%Y-%m-%d") if is_tomorrow_data else now.strftime("%Y-%m-%d")
-            
-            day_codes = []
-            day_pops = []
-            for t_str, code, pop in zip(hourly_series['timeDefines'], sapporo_hourly['weatherCodes'], sapporo_hourly['pops']):
-                if target_date_str in t_str:
-                    dt_obj = datetime.fromisoformat(t_str).astimezone(jst)
-                    day_codes.append((dt_obj.hour, code))
-                    day_pops.append(int(pop))
-            
-            # 札幌だけの降水確率を正しく取得
-            max_prob = max(day_pops) if day_pops else 0
-            prob_str = f"{max_prob}%"
-            umbrella_mark = " ☔" if max_prob >= 50 else (" ☂" if max_prob >= 30 else "")
-
-            # 代表天気アイコンの決定 (016010: 札幌)
-            weather_areas = area_forecast['timeSeries'][0]['areas']
-            sapporo_weather = next((a for a in weather_areas if a['area']['code'] == '016010'), weather_areas[0])
-            main_code = sapporo_weather['weatherCodes'][day_idx]
-            day_symbol = get_weather_symbol_by_code(main_code)
-            
-            title_text = f"札幌市中央区の{label_head}: {day_symbol}"
-
-            # 3時間ごとのピンポイント天気（札幌14163のコードから変換）
-            symbol_06 = next((get_weather_symbol_by_code(c) for h, c in day_codes if h == 6), day_symbol)
-            symbol_12 = next((get_weather_symbol_by_code(c) for h, c in day_codes if h == 12), day_symbol)
-            symbol_18 = next((get_weather_symbol_by_code(c) for h, c in day_codes if h == 18), day_symbol)
-
+            # --- 4. 時間ごとの気温算出と天気記号の適用 ---
             temp_06 = t_min_num + 1
             temp_12 = t_max_num - 2
             temp_18 = t_max_num - 4
             
+            # 時間帯ごとのマークにも全体の美しい矢印記号（day_symbol）をバッチリ適用
             forecast_lines = [
                 f"最大降水確率：{prob_str}{umbrella_mark}",
-                f"最低: {tmin_raw}°C  最高: {tmax_raw}°C",
-                f"06:00 {symbol_06}  {temp_06}°C{get_clothing_advice(temp_06)}",
-                f"12:00 {symbol_12}  {temp_12}°C{get_clothing_advice(temp_12)}",
-                f"18:00 {symbol_18}  {temp_18}°C{get_clothing_advice(temp_18)}"
+                f"最低: {tmin_val}°C  最高: {tmax_val}°C",
+                f"06:00 {day_symbol}  {temp_06}°C{get_clothing_advice(temp_06)}",
+                f"12:00 {day_symbol}  {temp_12}°C{get_clothing_advice(temp_12)}",
+                f"18:00 {day_symbol}  {temp_18}°C{get_clothing_advice(temp_18)}"
             ]
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（札幌エリアコード完全固定版） ---")
+            print("--- 送信データ内容ログ（完全復活・安定矢印版） ---")
             print(f"JST Time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
