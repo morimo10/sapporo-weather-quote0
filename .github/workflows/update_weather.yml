@@ -2,7 +2,7 @@ name: Update Weather and Clothing for Dot V2 (Pure JMA Hourly Eco Version)
 
 on:
   schedule:
-    - cron: '0 21-23,0-12 * * *'
+    - cron: '7 21-23,0-12 * * *'
   workflow_dispatch: # 手動実行用
 
 jobs:
