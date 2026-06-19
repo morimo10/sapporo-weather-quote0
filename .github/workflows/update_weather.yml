@@ -65,7 +65,7 @@ jobs:
             return "☁"
 
         def get_clothing_advice(temp):
-            if temp is None: return " 全着"
+            if temp is None: return " 不明？"
             if temp >= 30: return " Ｔシャツ"
             elif temp >= 25: return " 半袖シャツ"
             elif temp >= 20: return " 長袖シャツ"
@@ -119,7 +119,7 @@ jobs:
             # 文字の揺れをすべて吸収して判定
             day_symbol = get_advanced_weather_symbol(weather_text, max_prob)
             
-            title_text = f"札幌の{label_head}: {day_symbol}"
+            title_text = f"{label_head}の札幌市: {day_symbol}"
             
             # --- 3. 最高・最低気温の取得 ---
             temp_time_series = area_forecast['timeSeries'][2]
