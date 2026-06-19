@@ -39,10 +39,14 @@ jobs:
         def get_advanced_weather_symbol(text, max_prob):
             if not text: return "☁"
             
+            # 降水確率が30%未満のときは、テキストから「雨」や「雪」という文字を完全消去（誤爆防止）
             if max_prob < 30:
                 text = text.replace("雨", "").replace("雪", "")
             
+            # 【ロジックを全面刷新】
+            # 送り仮名（り、れ）があっても無くても、「晴」と「曇」の両方が含まれているかをシンプルに探します。
             if "晴" in text and "曇" in text:
+                # 文章の中で「晴」が先に出てくるか、「曇」が先に出てくるかで矢印の向きを決定
                 return "☀→☁" if text.find("晴") < text.find("曇") else "☁→☀"
             elif "晴" in text and "雨" in text:
                 return "☀→☔" if text.find("晴") < text.find("雨") else "☔→☀"
@@ -53,6 +57,7 @@ jobs:
             elif "雨" in text and "雪" in text:
                 return "☔→☃" if text.find("雨") < text.find("雪") else "☃→☔"
             
+            # 単一の天気
             if "晴" in text: return "☀"
             elif "曇" in text: return "☁"
             elif "雨" in text: return "☔"
@@ -111,9 +116,9 @@ jobs:
             
             weather_text = sapporo_weather['weathers'][day_idx]
             
+            # 文字の揺れをすべて吸収して判定
             day_symbol = get_advanced_weather_symbol(weather_text, max_prob)
             
-            # 【ここを修正】「札幌市中央区の」から「札幌の」に変更
             title_text = f"札幌の{label_head}: {day_symbol}"
             
             # --- 3. 最高・最低気温の取得 ---
@@ -158,8 +163,9 @@ jobs:
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（タイトル『札幌の〜』変更版） ---")
+            print("--- 送信データ内容ログ（文字の揺れ完全吸収版） ---")
             print(f"JST Time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
+            print(f"Original Text: {weather_text}") # 念のため気象庁の生テキストもログに出します
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
             print("---------------------------------------------------------")
