@@ -111,7 +111,9 @@ jobs:
             
             weather_text = sapporo_weather['weathers'][day_idx]
             day_symbol = get_advanced_weather_symbol(weather_text, max_prob)
-            title_text = f"{label_head}の札幌市: {day_symbol}"
+            
+            # 【変更点1】「札幌市中央区」に変更
+            title_text = f"{label_head}の札幌市中央区: {day_symbol}"
             
             # --- 3. 最高・最低気温の取得 ---
             temp_time_series = area_forecast['timeSeries'][2]
@@ -147,12 +149,12 @@ jobs:
             # --- 4. 時間ごとの気温算出と天気記号の適用 ---
             temp_06 = t_min_num + 1
             temp_12 = t_max_num - 2
-            temp_15 = t_max_num - 1  # 【新設】15時は一日の最高気温にかなり近い温度になります
+            temp_15 = t_max_num - 1
             temp_18 = t_max_num - 4
             
-            # 【ここを修正】15:00の行を新しく追加しました
+            # 【変更点2・3】「低」「高」「傘」の超ミニマル表記に修正
             forecast_lines = [
-                f"最低:{tmin_val}°C 最高:{tmax_val}°C 降水:{prob_str}{umbrella_mark}",
+                f"低:{tmin_val}°C 高:{tmax_val}°C 傘:{prob_str}{umbrella_mark}",
                 f"06:00 {day_symbol}  {temp_06}°C{get_clothing_advice(temp_06)}",
                 f"12:00 {day_symbol}  {temp_12}°C{get_clothing_advice(temp_12)}",
                 f"15:00 {day_symbol}  {temp_15}°C{get_clothing_advice(temp_15)}",
@@ -161,7 +163,7 @@ jobs:
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（15:00予報追加版） ---")
+            print("--- 送信データ内容ログ（超ミニマル表記版） ---")
             print(f"JST Time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
