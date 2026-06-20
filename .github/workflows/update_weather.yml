@@ -2,8 +2,8 @@ name: Update Weather and Clothing for Dot V2 (Pure JMA Hourly Eco Version)
 
 on:
   schedule:
-    - cron: '7 21-23,0-12 * * *'
-  workflow_dispatch: # 手動実行用
+    - cron: '0 21-23,0-12 * * *'
+  workflow_dispatch:
 
 jobs:
   update-weather:
@@ -39,14 +39,10 @@ jobs:
         def get_advanced_weather_symbol(text, max_prob):
             if not text: return "☁"
             
-            # 降水確率が30%未満のときは、テキストから「雨」や「雪」という文字を完全消去（誤爆防止）
             if max_prob < 30:
                 text = text.replace("雨", "").replace("雪", "")
             
-            # 【ロジックを全面刷新】
-            # 送り仮名（り、れ）があっても無くても、「晴」と「曇」の両方が含まれているかをシンプルに探します。
             if "晴" in text and "曇" in text:
-                # 文章の中で「晴」が先に出てくるか、「曇」が先に出てくるかで矢印の向きを決定
                 return "☀→☁" if text.find("晴") < text.find("曇") else "☁→☀"
             elif "晴" in text and "雨" in text:
                 return "☀→☔" if text.find("晴") < text.find("雨") else "☔→☀"
@@ -57,7 +53,6 @@ jobs:
             elif "雨" in text and "雪" in text:
                 return "☔→☃" if text.find("雨") < text.find("雪") else "☃→☔"
             
-            # 単一の天気
             if "晴" in text: return "☀"
             elif "曇" in text: return "☁"
             elif "雨" in text: return "☔"
@@ -65,7 +60,7 @@ jobs:
             return "☁"
 
         def get_clothing_advice(temp):
-            if temp is None: return " 不明？"
+            if temp is None: return " 不明？"  # ご自身による修正（全着 ➔ 不明？）を反映
             if temp >= 30: return " Ｔシャツ"
             elif temp >= 25: return " 半袖シャツ"
             elif temp >= 20: return " 長袖シャツ"
@@ -115,32 +110,47 @@ jobs:
             sapporo_weather = next((a for a in weather_areas if a['area']['code'] == '016010'), weather_areas[0])
             
             weather_text = sapporo_weather['weathers'][day_idx]
-            
-            # 文字の揺れをすべて吸収して判定
             day_symbol = get_advanced_weather_symbol(weather_text, max_prob)
             
-            title_text = f"{label_head}の札幌市中央区: {day_symbol}"
+            # 【ご自身による修正】「今日の札幌市」の順序を維持
+            title_text = f"{label_head}の札幌市: {day_symbol}"
             
-            # --- 3. 最高・最低気温の取得 ---
+            # --- 3. 最高・最低気温と「対象時刻」の取得 ---
             temp_time_series = area_forecast['timeSeries'][2]
             temp_areas = temp_time_series['areas']
             sapporo_temp = next((a for a in temp_areas if a['area']['code'] == '016010'), temp_areas[0])
             temps = sapporo_temp['temps']
+            temp_times = temp_time_series['timeDefines']  # 気温に対応する時間定義配列
             
             tmin_raw = ""
             tmax_raw = ""
+            tmax_time_str = "00:00"  # 初期値
+            
             if len(temps) >= 4:
-                tmin_raw = temps[2] if is_tomorrow_data else temps[0]
-                tmax_raw = temps[3] if is_tomorrow_data else temps[1]
+                if is_tomorrow_data:
+                    tmin_raw = temps[2]
+                    tmax_raw = temps[3]
+                    raw_time = temp_times[3]
+                else:
+                    tmin_raw = temps[0]
+                    tmax_raw = temps[1]
+                    raw_time = temp_times[1]
+                # ISO時間の文字列から時間（HH:MM）を抽出
+                tmax_time_str = datetime.fromisoformat(raw_time).astimezone(jst).strftime("%H:%M")
             else:
                 tmin_raw = temps[0] if len(temps) > 0 else ""
                 tmax_raw = temps[1] if len(temps) > 1 else ""
+                if len(temps) > 1:
+                    tmax_time_str = datetime.fromisoformat(temp_times[1]).astimezone(jst).strftime("%H:%M")
 
             if not is_tomorrow_data and (not tmin_raw or tmin_raw == tmax_raw):
-                try: tmin_raw = res[1]['timeSeries'][1]['areas'][0]['tempsMin'][0]
-                except: tmin_raw = "14"
+                try: 
+                    tmin_raw = res[1]['timeSeries'][1]['areas'][0]['tempsMin'][0]
+                except: 
+                    tmin_raw = "14"
             
-            if not tmax_raw: tmax_raw = "25"
+            if not tmax_raw: 
+                tmax_raw = "25"
 
             t_min_num = int(tmin_raw) if tmin_raw.strip() else 14
             t_max_num = int(tmax_raw) if tmax_raw.strip() else 25
@@ -153,9 +163,10 @@ jobs:
             temp_12 = t_max_num - 2
             temp_18 = t_max_num - 4
             
+            # 【ここを修正】最高気温の横に対象時刻 (xx:xx) を付与
             forecast_lines = [
                 f"最大降水確率：{prob_str}{umbrella_mark}",
-                f"最低: {tmin_val}°C  最高: {tmax_val}°C",
+                f"最低: {tmin_val}°C  最高: {tmax_val}°C({tmax_time_str})",
                 f"06:00 {day_symbol}  {temp_06}°C{get_clothing_advice(temp_06)}",
                 f"12:00 {day_symbol}  {temp_12}°C{get_clothing_advice(temp_12)}",
                 f"18:00 {day_symbol}  {temp_18}°C{get_clothing_advice(temp_18)}"
@@ -163,9 +174,8 @@ jobs:
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（文字の揺れ完全吸収版） ---")
+            print("--- 送信データ内容ログ（最高気温時刻追加版） ---")
             print(f"JST Time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
-            print(f"Original Text: {weather_text}") # 念のため気象庁の生テキストもログに出します
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
             print("---------------------------------------------------------")
