@@ -2,7 +2,8 @@ name: Update Weather and Clothing for Dot V2 (Pure JMA Hourly Eco Version)
 
 on:
   schedule:
-    - cron: '7,37 21-23,0-12 * * *'
+    # 日本時間の05:00〜21:59の間、15分おきに実行命令を出します（GitHubの遅延対策）
+    - cron: '*/15 0-12,20-23 * * *'
   workflow_dispatch:
 
 jobs:
@@ -38,10 +39,8 @@ jobs:
 
         def get_advanced_weather_symbol(text, max_prob):
             if not text: return "☁"
-            
             if max_prob < 30:
                 text = text.replace("雨", "").replace("雪", "")
-            
             if "晴" in text and "曇" in text:
                 return "☀→☁" if text.find("晴") < text.find("曇") else "☁→☀"
             elif "晴" in text and "雨" in text:
@@ -52,7 +51,6 @@ jobs:
                 return "☁→☃" if text.find("曇") < text.find("雪") else "☃→☁"
             elif "雨" in text and "雪" in text:
                 return "☔→☃" if text.find("雨") < text.find("雪") else "☃→☔"
-            
             if "晴" in text: return "☀"
             elif "曇" in text: return "☁"
             elif "雨" in text: return "☔"
@@ -112,7 +110,6 @@ jobs:
             weather_text = sapporo_weather['weathers'][day_idx]
             day_symbol = get_advanced_weather_symbol(weather_text, max_prob)
             
-            # 【変更点1】「札幌市中央区」に変更
             title_text = f"{label_head}の札幌市中央区: {day_symbol}"
             
             # --- 3. 最高・最低気温の取得 ---
@@ -152,7 +149,6 @@ jobs:
             temp_15 = t_max_num - 1
             temp_18 = t_max_num - 4
             
-            # 【変更点2・3】「低」「高」「傘」の超ミニマル表記に修正
             forecast_lines = [
                 f"低:{tmin_val}°C 高:{tmax_val}°C 傘:{prob_str}{umbrella_mark}",
                 f"06:00 {day_symbol}  {temp_06}°C{get_clothing_advice(temp_06)}",
@@ -163,19 +159,41 @@ jobs:
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（超ミニマル表記版） ---")
-            print(f"JST Time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
-            print(f"Title  : {title_text}")
-            print(f"Message:\n{weather_message}")
-            print("---------------------------------------------------------")
-
+            # 【重要】現在の「日付と時間（◯時）」を組み合わせた固有の一時的なキーを作成
+            # 例: "[今日の札幌市中央区: ☀ - 2026-06-21 21:00]"
+            time_unique_key = f"[{title_text} - {now.strftime('%Y-%m-%d %H:00')}]"
+            
+            # --- Dotの現在の画面を読み込んで重複チェックを行うロジック ---
             headers = {
                 "Authorization": f"Bearer {API_KEY}",
                 "Content-Type": "application/json"
             }
+            
+            print("--- 時間帯ごとの二重実行チェック中 ---")
+            try:
+                current_dot_res = requests.get(DOT_API_URL, headers=headers).json()
+                current_dot_title = current_dot_res.get("title", "")
+                
+                # Dot上のタイトル（隠しスタンプ付き）と今回のスタンプが完全一致したらその時間はスキップ
+                if current_dot_title == time_unique_key:
+                    print(f"判別結果: すでに【{now.strftime('%H:00')}時台】の最初の実行は完了しています。")
+                    print("送信をスキップ（パス）して正常終了します。")
+                    exit(0)
+                else:
+                    print(f"判別結果: 新しい時間帯【{now.strftime('%H:00')}時台】に突入したため、送信処理へ進みます。")
+            except Exception as read_err:
+                print(f"※データの取得に失敗したため、判別をスルーして送信します: {read_err}")
+
+            print("--- 送信データ内容ログ ---")
+            print(f"JST Time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
+            print(f"Title (with Stamp): {time_unique_key}")
+            print(f"Message:\n{weather_message}")
+            print("---------------------------------------------------------")
+
+            # 内部的なタイトルに時間スタンプ（time_unique_key）を指定して送信します
             payload = {
                 "refreshNow": True,
-                "title": title_text,
+                "title": time_unique_key,
                 "message": weather_message,
                 "style": "UnifontExMono16"
             }
