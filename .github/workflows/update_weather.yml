@@ -10,6 +10,16 @@ jobs:
   update-weather:
     runs-on: ubuntu-latest
     steps:
+    # --- 1. キャッシュの読み込み ---
+    # 前回保存した「last_run_hour.txt」があれば、この環境に復元します。
+    - name: Restore Last Run Hour Cache
+      uses: actions/cache@v4
+      with:
+        path: last_run_hour.txt
+        key: weather-run-hour-cache-${{ github.run_id }}
+        restore-keys: |
+          weather-run-hour-cache-
+
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
@@ -84,6 +94,24 @@ jobs:
             
             day_idx = 1 if is_tomorrow_data else 0
             
+            # --- 【新設】GitHubのキャッシュファイルを用いた二重実行チェック ---
+            # 「日付-◯時」の文字列を作成 (例: "2026-06-21-22")
+            current_hour_str = now.strftime("%Y-%m-%d-%H")
+            cache_file = "last_run_hour.txt"
+            
+            print("--- Actionsキャッシュによる二重実行チェック中 ---")
+            if os.path.exists(cache_file):
+                with open(cache_file, "r") as f:
+                    last_run_hour = f.read().strip()
+                
+                # 前回の実行時と「同じ日の同じ時間帯」なら、送信せずに終了
+                if last_run_hour == current_hour_str:
+                    print(f"判別結果: すでに【{now.strftime('%H:00')}時台】の最初の実行は完了しています。(Cache: {last_run_hour})")
+                    print("送信をスキップ（パス）して正常終了します。")
+                    exit(0)
+            
+            print(f"判別結果: 新しい時間帯【{now.strftime('%H:00')}時台】の初実行です。送信処理へ進みます。")
+
             # --- 1. 降水確率の取得 ---
             prob_time_series = area_forecast['timeSeries'][1]
             prob_areas = prob_time_series['areas']
@@ -159,41 +187,19 @@ jobs:
             
             weather_message = "\n".join(forecast_lines)
             
-            # 【重要】現在の「日付と時間（◯時）」を組み合わせた固有の一時的なキーを作成
-            # 例: "[今日の札幌市中央区: ☀ - 2026-06-21 21:00]"
-            time_unique_key = f"[{title_text} - {now.strftime('%Y-%m-%d %H:00')}]"
-            
-            # --- Dotの現在の画面を読み込んで重複チェックを行うロジック ---
+            print("--- 送信データ内容ログ ---")
+            print(f"JST Time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
+            print(f"Title  : {title_text}")
+            print(f"Message:\n{weather_message}")
+            print("---------------------------------------------------------")
+
             headers = {
                 "Authorization": f"Bearer {API_KEY}",
                 "Content-Type": "application/json"
             }
-            
-            print("--- 時間帯ごとの二重実行チェック中 ---")
-            try:
-                current_dot_res = requests.get(DOT_API_URL, headers=headers).json()
-                current_dot_title = current_dot_res.get("title", "")
-                
-                # Dot上のタイトル（隠しスタンプ付き）と今回のスタンプが完全一致したらその時間はスキップ
-                if current_dot_title == time_unique_key:
-                    print(f"判別結果: すでに【{now.strftime('%H:00')}時台】の最初の実行は完了しています。")
-                    print("送信をスキップ（パス）して正常終了します。")
-                    exit(0)
-                else:
-                    print(f"判別結果: 新しい時間帯【{now.strftime('%H:00')}時台】に突入したため、送信処理へ進みます。")
-            except Exception as read_err:
-                print(f"※データの取得に失敗したため、判別をスルーして送信します: {read_err}")
-
-            print("--- 送信データ内容ログ ---")
-            print(f"JST Time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
-            print(f"Title (with Stamp): {time_unique_key}")
-            print(f"Message:\n{weather_message}")
-            print("---------------------------------------------------------")
-
-            # 内部的なタイトルに時間スタンプ（time_unique_key）を指定して送信します
             payload = {
                 "refreshNow": True,
-                "title": time_unique_key,
+                "title": title_text,
                 "message": weather_message,
                 "style": "UnifontExMono16"
             }
@@ -201,6 +207,9 @@ jobs:
             response = requests.post(DOT_API_URL, headers=headers, json=payload)
             if response.status_code in [200, 201]:
                 print(f"成功: {response.json().get('message')}")
+                # 送信に成功した場合のみ、今回の時間帯をファイルに書き込んで記憶させる
+                with open(cache_file, "w") as f:
+                    f.write(current_hour_str)
             else:
                 print(f"エラー発生 (ステータスコード: {response.status_code})")
                 exit(1)
@@ -209,3 +218,12 @@ jobs:
             print(f"スクリプト実行エラー: {e}")
             exit(1)
         EOF
+
+    # --- 5. キャッシュの保存（送信成功時のみ） ---
+    # Pythonが新しく書き換えた「last_run_hour.txt」をGitHubのサーバーに保存します。
+    - name: Save Run Hour Cache
+      uses: actions/cache/save@v4
+      if: success()
+      with:
+        path: last_run_hour.txt
+        key: weather-run-hour-cache-${{ github.run_id }}
