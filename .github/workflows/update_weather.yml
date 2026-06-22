@@ -10,8 +10,6 @@ jobs:
   update-weather:
     runs-on: ubuntu-latest
     steps:
-    # --- 1. キャッシュの読み込み ---
-    # 前回保存した「last_run_hour.txt」があれば、この環境に復元します。
     - name: Restore Last Run Hour Cache
       uses: actions/cache@v4
       with:
@@ -67,6 +65,15 @@ jobs:
             elif "雪" in text: return "☃"
             return "☁"
 
+        # 【新設】天気コード（JMA weather code）を1文字のコンパクトな記号に変換する関数
+        def code_to_symbol(code):
+            c = int(code)
+            if 100 <= c < 200: return "☀"
+            if 200 <= c < 300: return "☁"
+            if 300 <= c < 400: return "☔"
+            if 400 <= c < 500: return "☃"
+            return "☁"
+
         def get_clothing_advice(temp):
             if temp is None: return " 不明？"
             if temp >= 30: return " Ｔシャツ"
@@ -94,8 +101,7 @@ jobs:
             
             day_idx = 1 if is_tomorrow_data else 0
             
-            # --- 【新設】GitHubのキャッシュファイルを用いた二重実行チェック ---
-            # 「日付-◯時」の文字列を作成 (例: "2026-06-21-22")
+            # --- GitHubのキャッシュファイルを用いた二重実行チェック ---
             current_hour_str = now.strftime("%Y-%m-%d-%H")
             cache_file = "last_run_hour.txt"
             
@@ -103,20 +109,17 @@ jobs:
             if os.path.exists(cache_file):
                 with open(cache_file, "r") as f:
                     last_run_hour = f.read().strip()
-                
-                # 前回の実行時と「同じ日の同じ時間帯」なら、送信せずに終了
                 if last_run_hour == current_hour_str:
-                    print(f"判別結果: すでに【{now.strftime('%H:00')}時台】の最初の実行は完了しています。(Cache: {last_run_hour})")
+                    print(f"判別結果: すでに【{now.strftime('%H:00')}時台】の最初の実行は完了しています。")
                     print("送信をスキップ（パス）して正常終了します。")
                     exit(0)
             
-            print(f"判別結果: 新しい時間帯【{now.strftime('%H:00')}時台】の初実行です。送信処理へ進みます。")
+            print(f"判別結果: 新しい時間帯【{now.strftime('%H:00')}時台】の初実行です。処理を進めます。")
 
-            # --- 1. 降水確率の取得 ---
+            # --- 1. 降水確率の取得（1行目の最大降水確率用） ---
             prob_time_series = area_forecast['timeSeries'][1]
             prob_areas = prob_time_series['areas']
             sapporo_prob = next((a for a in prob_areas if a['area']['code'] == '016010'), prob_areas[0])
-            
             prob_pops = sapporo_prob['pops']
             prob_times = prob_time_series['timeDefines']
             
@@ -131,13 +134,11 @@ jobs:
             prob_str = f"{max_prob}%"
             umbrella_mark = "☔" if max_prob >= 50 else ("☂" if max_prob >= 30 else "")
             
-            # --- 2. 天気テキストの取得と矢印変換処理 ---
+            # --- 2. 天気テキストの取得とタイトル用マークの変換 ---
             weather_areas = area_forecast['timeSeries'][0]['areas']
             sapporo_weather = next((a for a in weather_areas if a['area']['code'] == '016010'), weather_areas[0])
-            
             weather_text = sapporo_weather['weathers'][day_idx]
             day_symbol = get_advanced_weather_symbol(weather_text, max_prob)
-            
             title_text = f"{label_head}の札幌市中央区: {day_symbol}"
             
             # --- 3. 最高・最低気温の取得 ---
@@ -146,48 +147,63 @@ jobs:
             sapporo_temp = next((a for a in temp_areas if a['area']['code'] == '016010'), temp_areas[0])
             temps = sapporo_temp['temps']
             
-            tmin_raw = ""
-            tmax_raw = ""
-            
-            if len(temps) >= 4:
-                tmin_raw = temps[2] if is_tomorrow_data else temps[0]
-                tmax_raw = temps[3] if is_tomorrow_data else temps[1]
-            else:
-                tmin_raw = temps[0] if len(temps) > 0 else ""
-                tmax_raw = temps[1] if len(temps) > 1 else ""
+            tmin_raw = temps[2] if is_tomorrow_data and len(temps) >= 4 else (temps[0] if len(temps) > 0 else "14")
+            tmax_raw = temps[3] if is_tomorrow_data and len(temps) >= 4 else (temps[1] if len(temps) > 1 else "25")
 
             if not is_tomorrow_data and (not tmin_raw or tmin_raw == tmax_raw):
-                try: 
-                    tmin_raw = res[1]['timeSeries'][1]['areas'][0]['tempsMin'][0]
-                except: 
-                    tmin_raw = "14"
-            
-            if not tmax_raw: 
-                tmax_raw = "25"
+                try: tmin_raw = res[1]['timeSeries'][1]['areas'][0]['tempsMin'][0]
+                except: tmin_raw = "14"
+            if not tmax_raw: tmax_raw = "25"
 
-            t_min_num = int(tmin_raw) if tmin_raw.strip() else 14
-            t_max_num = int(tmax_raw) if tmax_raw.strip() else 25
+            t_min_num = int(tmin_raw)
+            t_max_num = int(tmax_raw)
             
-            tmin_val = str(t_min_num)
-            tmax_val = str(t_max_num)
-            
-            # --- 4. 時間ごとの気温算出と天気記号の適用 ---
+            # --- 4. 【大幅強化】時系列予報（3時間ごとデータ）の解析 ---
+            # 気象庁の「時系列1（3時間ごとの天気・降水確率）」からデータを抽出
+            hourly_series = res[0]['timeSeries'][1] 
+            hourly_times = hourly_series['timeDefines']
+            hourly_weather_codes = hourly_series['areas'][0]['weatherCodes'] # 天気コード
+            hourly_pops = hourly_series['areas'][0]['pops']                 # 降水確率
+
+            # 目的の時間（06, 12, 15, 18）にマッチする実際の予報コードと降水確率を検索する関数
+            def find_hourly_data(target_hour_str, base_temp):
+                # 該当する時間の天気マークと、降水確率を特定
+                for t_str, code, pop in zip(hourly_times, hourly_weather_codes, hourly_pops):
+                    # ISOタイムスタンプの時刻部分を解析（例: "2026-06-21T06:00:00+09:00"）
+                    dt_parsed = datetime.fromisoformat(t_str).astimezone(jst)
+                    if dt_parsed.strftime("%Y-%m-%d") == target_date_str and dt_parsed.strftime("%H") == target_hour_str:
+                        sym = code_to_symbol(code)
+                        # 雨コードだけどその時間の降水確率が30%未満なら、曇りに安全補正
+                        if sym == "☔" and int(pop) < 30:
+                            sym = "☁"
+                        return sym, int(pop)
+                # 見つからない場合はデフォルト値
+                return day_symbol, 0
+
+            # 3時間ごとのリアルな天気マークと各時間の降水確率を取得
+            sym_06, pop_06 = find_hourly_data("06", 0)
+            sym_12, pop_12 = find_hourly_data("12", 0)
+            sym_15, pop_15 = find_hourly_data("15", 0)
+            sym_18, pop_18 = find_hourly_data("18", 0)
+
+            # 気温の算出
             temp_06 = t_min_num + 1
             temp_12 = t_max_num - 2
             temp_15 = t_max_num - 1
             temp_18 = t_max_num - 4
             
+            # 【見た目の変更】各時間帯の横に、その時間独自の「本物の天気マーク」を配置
             forecast_lines = [
-                f"低:{tmin_val}°C 高:{tmax_val}°C 傘:{prob_str}{umbrella_mark}",
-                f"06:00 {day_symbol}  {temp_06}°C{get_clothing_advice(temp_06)}",
-                f"12:00 {day_symbol}  {temp_12}°C{get_clothing_advice(temp_12)}",
-                f"15:00 {day_symbol}  {temp_15}°C{get_clothing_advice(temp_15)}",
-                f"18:00 {day_symbol}  {temp_18}°C{get_clothing_advice(temp_18)}"
+                f"低:{t_min_num}°C 高:{t_max_num}°C 傘:{prob_str}{umbrella_mark}",
+                f"06:00 {sym_06}  {temp_06}°C{get_clothing_advice(temp_06)}",
+                f"12:00 {sym_12}  {temp_12}°C{get_clothing_advice(temp_12)}",
+                f"15:00 {sym_15}  {temp_15}°C{get_clothing_advice(temp_15)}",
+                f"18:00 {sym_18}  {temp_18}°C{get_clothing_advice(temp_18)}"
             ]
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ ---")
+            print("--- 送信データ内容ログ（時系列予報完全版） ---")
             print(f"JST Time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
@@ -207,7 +223,6 @@ jobs:
             response = requests.post(DOT_API_URL, headers=headers, json=payload)
             if response.status_code in [200, 201]:
                 print(f"成功: {response.json().get('message')}")
-                # 送信に成功した場合のみ、今回の時間帯をファイルに書き込んで記憶させる
                 with open(cache_file, "w") as f:
                     f.write(current_hour_str)
             else:
@@ -219,8 +234,6 @@ jobs:
             exit(1)
         EOF
 
-    # --- 5. キャッシュの保存（送信成功時のみ） ---
-    # Pythonが新しく書き換えた「last_run_hour.txt」をGitHubのサーバーに保存します。
     - name: Save Run Hour Cache
       uses: actions/cache/save@v4
       if: success()
