@@ -145,7 +145,7 @@ jobs:
             prob_str = f"{max_prob}%"
             umbrella_mark = "☔" if max_prob >= 50 else ("☂" if max_prob >= 30 else "")
 
-            # タイトル用お天気マークの生成（曇後雨なら ☁→☔ に変化します）
+            # タイトル用お天気マークの生成
             day_symbol = get_advanced_weather_symbol(weather_text, max_prob)
             title_text = f"{label_head}の札幌市中央区: {day_symbol}"
 
@@ -178,38 +178,49 @@ jobs:
                             clean_code = str(code).strip()
                             clean_pop = str(pop).strip()
                             
-                            pop_val = int(clean_pop) if clean_pop and clean_pop.isdigit() else 0
                             sym = code_to_symbol(clean_code)
                             
-                            # 【グラデーション微調整】雨予報コード（☔）であっても、
-                            # その時間の降水確率が40%以下なら、まだ降らないと判定して「曇り（☁）」に変える
-                            if sym == "☔" and pop_val <= 40:
+                            if clean_pop and clean_pop.isdigit():
+                                pop_val = int(clean_pop)
+                            else:
+                                pop_val = 50 if sym == "☔" else 0
+                            
+                            # 汎用クロスチェック判定
+                            if sym == "☔" and pop_val < 30:
                                 sym = "☁"
+                            elif sym != "☔" and pop_val >= 60:
+                                sym = "☔"
+                                
                             return sym, pop_val
                 return day_symbol, 0
 
-            sym_06, pop_06 = find_hourly_data("06")
-            sym_12, pop_12 = find_hourly_data("12")
-            sym_15, pop_15 = find_hourly_data("15")
-            sym_18, pop_18 = find_hourly_data("18")
-
-            # 気温の算出
-            temp_06 = t_min_num + 1
-            temp_12 = t_max_num - 2
-            temp_15 = t_max_num - 1
-            temp_18 = t_max_num - 4
+            # --- 6. 過去時間（2時間以上経過）の自動フィルタリング ---
+            forecast_lines = [f"低:{t_min_num}°C 高:{t_max_num}°C 傘:{prob_str}{umbrella_mark}"]
             
-            forecast_lines = [
-                f"低:{t_min_num}°C 高:{t_max_num}°C 傘:{prob_str}{umbrella_mark}",
-                f"06:00 {sym_06}  {temp_06}°C{get_clothing_advice(temp_06)}",
-                f"12:00 {sym_12}  {temp_12}°C{get_clothing_advice(temp_12)}",
-                f"15:00 {sym_15}  {temp_15}°C{get_clothing_advice(temp_15)}",
-                f"18:00 {sym_18}  {temp_18}°C{get_clothing_advice(temp_18)}"
+            hourly_slots = [
+                ("06", "06:00"),
+                ("12", "12:00"),
+                ("15", "15:00"),
+                ("18", "18:00")
             ]
+            
+            for hour_val, label in hourly_slots:
+                # 明日予報か今日予報かでターゲット日付を補正
+                base_dt = now + timedelta(days=1) if is_tomorrow_data else now
+                target_dt = base_dt.replace(hour=int(hour_val), minute=0, second=0, microsecond=0)
+                
+                # 【重要】現在時刻がターゲット時間の2時間後を超えていたら、過去データとして非表示
+                if now > target_dt + timedelta(hours=2):
+                    continue
+                
+                sym, pop = find_hourly_data(hour_val)
+                temp = t_min_num + 1 if hour_val == "06" else (t_max_num - 2 if hour_val == "12" else (t_max_num - 1 if hour_val == "15" else t_max_num - 4))
+                
+                forecast_lines.append(f"{label} {sym}  {temp}°C{get_clothing_advice(temp)}")
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（時系列グラデーション最適化版） ---")
+            print("--- 送信データ内容ログ（未来フォーカス・汎用ロジック完全版） ---")
             print(f"JST Time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
