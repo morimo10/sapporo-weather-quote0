@@ -164,15 +164,14 @@ jobs:
             # --- 4. 時系列予報（3時間ごとデータ）の解析 ---
             hourly_series = res[0]['timeSeries'][1] 
             hourly_times = hourly_series['timeDefines']
-            hourly_weather_codes = hourly_series['areas'][0]['weatherCodes']
+            # 【ここを修正】'weatherCodes' から正しくは 'weatherCode' に修正しました
+            hourly_weather_codes = hourly_series['areas'][0]['weatherCode']
             hourly_pops = hourly_series['areas'][0]['pops']
 
-            # 【バグ修正】空のデータ（''）が入っていても、int()で落ちないように徹底的にガードを敷きました
             def find_hourly_data(target_hour_str):
                 for t_str, code, pop in zip(hourly_times, hourly_weather_codes, hourly_pops):
                     dt_parsed = datetime.fromisoformat(t_str).astimezone(jst)
                     if dt_parsed.strftime("%Y-%m-%d") == target_date_str and dt_parsed.strftime("%H") == target_hour_str:
-                        # 文字列が空だったり空白のみなら安全な値を代入
                         clean_code = str(code).strip()
                         clean_pop = str(pop).strip()
                         
