@@ -145,7 +145,7 @@ jobs:
             prob_str = f"{max_prob}%"
             umbrella_mark = "☔" if max_prob >= 50 else ("☂" if max_prob >= 30 else "")
 
-            # タイトル用お天気マークの生成
+            # タイトル用お天気マークの生成（曇後雨なら ☁→☔ に変化します）
             day_symbol = get_advanced_weather_symbol(weather_text, max_prob)
             title_text = f"{label_head}の札幌市中央区: {day_symbol}"
 
@@ -163,7 +163,6 @@ jobs:
                 except: tmin_raw = "14"
             if not tmax_raw or str(tmax_raw).strip() == "": tmax_raw = "25"
 
-            # 【重要：ここを徹底強化】int()に変換する前に、中身が空っぽだったら初期値を代入してクラッシュを完全に回避
             tmin_cleaned = str(tmin_raw).strip()
             tmax_cleaned = str(tmax_raw).strip()
             
@@ -182,7 +181,9 @@ jobs:
                             pop_val = int(clean_pop) if clean_pop and clean_pop.isdigit() else 0
                             sym = code_to_symbol(clean_code)
                             
-                            if sym == "☔" and pop_val < 30:
+                            # 【グラデーション微調整】雨予報コード（☔）であっても、
+                            # その時間の降水確率が40%以下なら、まだ降らないと判定して「曇り（☁）」に変える
+                            if sym == "☔" and pop_val <= 40:
                                 sym = "☁"
                             return sym, pop_val
                 return day_symbol, 0
@@ -208,7 +209,7 @@ jobs:
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（時系列予報完全修正・安全ガード版） ---")
+            print("--- 送信データ内容ログ（時系列グラデーション最適化版） ---")
             print(f"JST Time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
