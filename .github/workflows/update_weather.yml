@@ -119,8 +119,6 @@ jobs:
             
             print(f"判別結果: 新しい時間帯【{now.strftime('%H:00')}時台】の初実行です。処理を進めます。")
 
-            # === 【データ構造修正】気象庁データの各パーツを正しく分離取得 ===
-            
             # --- 1. 1日単位の基本天気予報 (timeSeries[0]) ---
             base_series = res[0]['timeSeries'][0]
             weather_areas = base_series['areas']
@@ -133,11 +131,10 @@ jobs:
             hourly_areas = hourly_series['areas']
             sapporo_hourly = next((a for a in hourly_areas if a['area']['code'] == '016010'), hourly_areas[0])
             
-            # ここが正しい引き出しのキー位置です
             hourly_weather_codes = sapporo_hourly.get('weatherCode', [])
             hourly_pops = sapporo_hourly.get('pops', [])
 
-            # --- 3. 降水確率の計算（1行目の最大降水確率用） ---
+            # --- 3. 降水確率の計算 ---
             day_pops = []
             for t_str, pop in zip(hourly_times, hourly_pops):
                 dt_parsed = datetime.fromisoformat(t_str).astimezone(jst)
@@ -166,12 +163,15 @@ jobs:
                 except: tmin_raw = "14"
             if not tmax_raw or str(tmax_raw).strip() == "": tmax_raw = "25"
 
-            t_min_num = int(tmin_raw)
-            t_max_num = int(tmax_raw)
+            # 【重要：ここを徹底強化】int()に変換する前に、中身が空っぽだったら初期値を代入してクラッシュを完全に回避
+            tmin_cleaned = str(tmin_raw).strip()
+            tmax_cleaned = str(tmax_raw).strip()
+            
+            t_min_num = int(tmin_cleaned) if tmin_cleaned and tmin_cleaned.isdigit() else 14
+            t_max_num = int(tmax_cleaned) if tmax_cleaned and tmax_cleaned.isdigit() else 25
 
             # --- 5. 時系列データの個別マッピング処理 ---
             def find_hourly_data(target_hour_str):
-                # weatherCodeとpopsが正しく取れている場合のみループ処理
                 if hourly_weather_codes and hourly_pops:
                     for t_str, code, pop in zip(hourly_times, hourly_weather_codes, hourly_pops):
                         dt_parsed = datetime.fromisoformat(t_str).astimezone(jst)
@@ -179,7 +179,7 @@ jobs:
                             clean_code = str(code).strip()
                             clean_pop = str(pop).strip()
                             
-                            pop_val = int(clean_pop) if clean_pop else 0
+                            pop_val = int(clean_pop) if clean_pop and clean_pop.isdigit() else 0
                             sym = code_to_symbol(clean_code)
                             
                             if sym == "☔" and pop_val < 30:
@@ -208,7 +208,7 @@ jobs:
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（時系列予報完全修正版） ---")
+            print("--- 送信データ内容ログ（時系列予報完全修正・安全ガード版） ---")
             print(f"JST Time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
