@@ -88,7 +88,6 @@ jobs:
 
         try:
             res = requests.get(JMA_FORECAST_URL).json()
-            area_forecast = res[0]
             
             jst = timezone(timedelta(hours=9))
             now_utc = datetime.now(timezone.utc)
@@ -103,7 +102,8 @@ jobs:
                 label_head = "今日"
             
             day_idx = 1 if is_tomorrow_data else 0
-            
+            target_date_str = (now + timedelta(days=1)).strftime("%Y-%m-%d") if is_tomorrow_data else now.strftime("%Y-%m-%d")
+
             # --- GitHubのキャッシュファイルを用いた二重実行チェック ---
             current_hour_str = now.strftime("%Y-%m-%d-%H")
             cache_file = "last_run_hour.txt"
@@ -119,34 +119,42 @@ jobs:
             
             print(f"判別結果: 新しい時間帯【{now.strftime('%H:00')}時台】の初実行です。処理を進めます。")
 
-            # --- 1. 降水確率の取得（1行目の最大降水確率用） ---
-            prob_time_series = area_forecast['timeSeries'][1]
-            prob_areas = prob_time_series['areas']
-            sapporo_prob = next((a for a in prob_areas if a['area']['code'] == '016010'), prob_areas[0])
-            prob_pops = sapporo_prob['pops']
-            prob_times = prob_time_series['timeDefines']
+            # === 【データ構造修正】気象庁データの各パーツを正しく分離取得 ===
             
-            target_date_str = (now + timedelta(days=1)).strftime("%Y-%m-%d") if is_tomorrow_data else now.strftime("%Y-%m-%d")
-                
+            # --- 1. 1日単位の基本天気予報 (timeSeries[0]) ---
+            base_series = res[0]['timeSeries'][0]
+            weather_areas = base_series['areas']
+            sapporo_weather = next((a for a in weather_areas if a['area']['code'] == '016010'), weather_areas[0])
+            weather_text = sapporo_weather['weathers'][day_idx]
+
+            # --- 2. 3時間ごとの時系列予報 (timeSeries[1]) ---
+            hourly_series = res[0]['timeSeries'][1]
+            hourly_times = hourly_series['timeDefines']
+            hourly_areas = hourly_series['areas']
+            sapporo_hourly = next((a for a in hourly_areas if a['area']['code'] == '016010'), hourly_areas[0])
+            
+            # ここが正しい引き出しのキー位置です
+            hourly_weather_codes = sapporo_hourly.get('weatherCode', [])
+            hourly_pops = sapporo_hourly.get('pops', [])
+
+            # --- 3. 降水確率の計算（1行目の最大降水確率用） ---
             day_pops = []
-            for t_str, pop in zip(prob_times, prob_pops):
-                if target_date_str in t_str and str(pop).strip() != "":
+            for t_str, pop in zip(hourly_times, hourly_pops):
+                dt_parsed = datetime.fromisoformat(t_str).astimezone(jst)
+                if dt_parsed.strftime("%Y-%m-%d") == target_date_str and str(pop).strip() != "":
                     day_pops.append(int(pop))
             
             max_prob = max(day_pops) if day_pops else 0
             prob_str = f"{max_prob}%"
             umbrella_mark = "☔" if max_prob >= 50 else ("☂" if max_prob >= 30 else "")
-            
-            # --- 2. 天気テキストの取得とタイトル用マークの変換 ---
-            weather_areas = area_forecast['timeSeries'][0]['areas']
-            sapporo_weather = next((a for a in weather_areas if a['area']['code'] == '016010'), weather_areas[0])
-            weather_text = sapporo_weather['weathers'][day_idx]
+
+            # タイトル用お天気マークの生成
             day_symbol = get_advanced_weather_symbol(weather_text, max_prob)
             title_text = f"{label_head}の札幌市中央区: {day_symbol}"
-            
-            # --- 3. 最高・最低気温の取得 ---
-            temp_time_series = area_forecast['timeSeries'][2]
-            temp_areas = temp_time_series['areas']
+
+            # --- 4. 最高・最低気温の取得 (timeSeries[2]) ---
+            temp_series = res[0]['timeSeries'][2]
+            temp_areas = temp_series['areas']
             sapporo_temp = next((a for a in temp_areas if a['area']['code'] == '016010'), temp_areas[0])
             temps = sapporo_temp['temps']
             
@@ -158,29 +166,25 @@ jobs:
                 except: tmin_raw = "14"
             if not tmax_raw or str(tmax_raw).strip() == "": tmax_raw = "25"
 
-            t_min_num = int(tmin_raw) if str(tmin_raw).strip() else 14
-            t_max_num = int(tmax_raw) if str(tmax_raw).strip() else 25
-            
-            # --- 4. 時系列予報（3時間ごとデータ）の解析 ---
-            hourly_series = res[0]['timeSeries'][1] 
-            hourly_times = hourly_series['timeDefines']
-            # 【ここを修正】'weatherCodes' から正しくは 'weatherCode' に修正しました
-            hourly_weather_codes = hourly_series['areas'][0]['weatherCode']
-            hourly_pops = hourly_series['areas'][0]['pops']
+            t_min_num = int(tmin_raw)
+            t_max_num = int(tmax_raw)
 
+            # --- 5. 時系列データの個別マッピング処理 ---
             def find_hourly_data(target_hour_str):
-                for t_str, code, pop in zip(hourly_times, hourly_weather_codes, hourly_pops):
-                    dt_parsed = datetime.fromisoformat(t_str).astimezone(jst)
-                    if dt_parsed.strftime("%Y-%m-%d") == target_date_str and dt_parsed.strftime("%H") == target_hour_str:
-                        clean_code = str(code).strip()
-                        clean_pop = str(pop).strip()
-                        
-                        pop_val = int(clean_pop) if clean_pop else 0
-                        sym = code_to_symbol(clean_code)
-                        
-                        if sym == "☔" and pop_val < 30:
-                            sym = "☁"
-                        return sym, pop_val
+                # weatherCodeとpopsが正しく取れている場合のみループ処理
+                if hourly_weather_codes and hourly_pops:
+                    for t_str, code, pop in zip(hourly_times, hourly_weather_codes, hourly_pops):
+                        dt_parsed = datetime.fromisoformat(t_str).astimezone(jst)
+                        if dt_parsed.strftime("%Y-%m-%d") == target_date_str and dt_parsed.strftime("%H") == target_hour_str:
+                            clean_code = str(code).strip()
+                            clean_pop = str(pop).strip()
+                            
+                            pop_val = int(clean_pop) if clean_pop else 0
+                            sym = code_to_symbol(clean_code)
+                            
+                            if sym == "☔" and pop_val < 30:
+                                sym = "☁"
+                            return sym, pop_val
                 return day_symbol, 0
 
             sym_06, pop_06 = find_hourly_data("06")
@@ -204,7 +208,7 @@ jobs:
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（時系列予報完全版） ---")
+            print("--- 送信データ内容ログ（時系列予報完全修正版） ---")
             print(f"JST Time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
