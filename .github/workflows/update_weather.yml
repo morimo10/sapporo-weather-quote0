@@ -65,13 +65,16 @@ jobs:
             elif "雪" in text: return "☃"
             return "☁"
 
-        # 【新設】天気コード（JMA weather code）を1文字のコンパクトな記号に変換する関数
         def code_to_symbol(code):
-            c = int(code)
-            if 100 <= c < 200: return "☀"
-            if 200 <= c < 300: return "☁"
-            if 300 <= c < 400: return "☔"
-            if 400 <= c < 500: return "☃"
+            if not code or str(code).strip() == "": return "☁"
+            try:
+                c = int(code)
+                if 100 <= c < 200: return "☀"
+                if 200 <= c < 300: return "☁"
+                if 300 <= c < 400: return "☔"
+                if 400 <= c < 500: return "☃"
+            except:
+                pass
             return "☁"
 
         def get_clothing_advice(temp):
@@ -127,7 +130,7 @@ jobs:
                 
             day_pops = []
             for t_str, pop in zip(prob_times, prob_pops):
-                if target_date_str in t_str:
+                if target_date_str in t_str and str(pop).strip() != "":
                     day_pops.append(int(pop))
             
             max_prob = max(day_pops) if day_pops else 0
@@ -150,41 +153,41 @@ jobs:
             tmin_raw = temps[2] if is_tomorrow_data and len(temps) >= 4 else (temps[0] if len(temps) > 0 else "14")
             tmax_raw = temps[3] if is_tomorrow_data and len(temps) >= 4 else (temps[1] if len(temps) > 1 else "25")
 
-            if not is_tomorrow_data and (not tmin_raw or tmin_raw == tmax_raw):
+            if not is_tomorrow_data and (not tmin_raw or str(tmin_raw).strip() == "" or tmin_raw == tmax_raw):
                 try: tmin_raw = res[1]['timeSeries'][1]['areas'][0]['tempsMin'][0]
                 except: tmin_raw = "14"
-            if not tmax_raw: tmax_raw = "25"
+            if not tmax_raw or str(tmax_raw).strip() == "": tmax_raw = "25"
 
-            t_min_num = int(tmin_raw)
-            t_max_num = int(tmax_raw)
+            t_min_num = int(tmin_raw) if str(tmin_raw).strip() else 14
+            t_max_num = int(tmax_raw) if str(tmax_raw).strip() else 25
             
-            # --- 4. 【大幅強化】時系列予報（3時間ごとデータ）の解析 ---
-            # 気象庁の「時系列1（3時間ごとの天気・降水確率）」からデータを抽出
+            # --- 4. 時系列予報（3時間ごとデータ）の解析 ---
             hourly_series = res[0]['timeSeries'][1] 
             hourly_times = hourly_series['timeDefines']
-            hourly_weather_codes = hourly_series['areas'][0]['weatherCodes'] # 天気コード
-            hourly_pops = hourly_series['areas'][0]['pops']                 # 降水確率
+            hourly_weather_codes = hourly_series['areas'][0]['weatherCodes']
+            hourly_pops = hourly_series['areas'][0]['pops']
 
-            # 目的の時間（06, 12, 15, 18）にマッチする実際の予報コードと降水確率を検索する関数
-            def find_hourly_data(target_hour_str, base_temp):
-                # 該当する時間の天気マークと、降水確率を特定
+            # 【バグ修正】空のデータ（''）が入っていても、int()で落ちないように徹底的にガードを敷きました
+            def find_hourly_data(target_hour_str):
                 for t_str, code, pop in zip(hourly_times, hourly_weather_codes, hourly_pops):
-                    # ISOタイムスタンプの時刻部分を解析（例: "2026-06-21T06:00:00+09:00"）
                     dt_parsed = datetime.fromisoformat(t_str).astimezone(jst)
                     if dt_parsed.strftime("%Y-%m-%d") == target_date_str and dt_parsed.strftime("%H") == target_hour_str:
-                        sym = code_to_symbol(code)
-                        # 雨コードだけどその時間の降水確率が30%未満なら、曇りに安全補正
-                        if sym == "☔" and int(pop) < 30:
+                        # 文字列が空だったり空白のみなら安全な値を代入
+                        clean_code = str(code).strip()
+                        clean_pop = str(pop).strip()
+                        
+                        pop_val = int(clean_pop) if clean_pop else 0
+                        sym = code_to_symbol(clean_code)
+                        
+                        if sym == "☔" and pop_val < 30:
                             sym = "☁"
-                        return sym, int(pop)
-                # 見つからない場合はデフォルト値
+                        return sym, pop_val
                 return day_symbol, 0
 
-            # 3時間ごとのリアルな天気マークと各時間の降水確率を取得
-            sym_06, pop_06 = find_hourly_data("06", 0)
-            sym_12, pop_12 = find_hourly_data("12", 0)
-            sym_15, pop_15 = find_hourly_data("15", 0)
-            sym_18, pop_18 = find_hourly_data("18", 0)
+            sym_06, pop_06 = find_hourly_data("06")
+            sym_12, pop_12 = find_hourly_data("12")
+            sym_15, pop_15 = find_hourly_data("15")
+            sym_18, pop_18 = find_hourly_data("18")
 
             # 気温の算出
             temp_06 = t_min_num + 1
@@ -192,7 +195,6 @@ jobs:
             temp_15 = t_max_num - 1
             temp_18 = t_max_num - 4
             
-            # 【見た目の変更】各時間帯の横に、その時間独自の「本物の天気マーク」を配置
             forecast_lines = [
                 f"低:{t_min_num}°C 高:{t_max_num}°C 傘:{prob_str}{umbrella_mark}",
                 f"06:00 {sym_06}  {temp_06}°C{get_clothing_advice(temp_06)}",
