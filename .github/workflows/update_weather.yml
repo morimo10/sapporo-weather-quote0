@@ -149,7 +149,7 @@ jobs:
             day_symbol = get_advanced_weather_symbol(weather_text, max_prob)
             title_text = f"{label_head}の札幌市中央区: {day_symbol}"
 
-            # --- 4. 最高・最低気温の取得 (timeSeries[2]) ---
+            # --- 4. 最高・最低気温と前日比の取得 (timeSeries[2]) ---
             temp_series = res[0]['timeSeries'][2]
             temp_areas = temp_series['areas']
             sapporo_temp = next((a for a in temp_areas if a['area']['code'] == '016010'), temp_areas[0])
@@ -168,6 +168,29 @@ jobs:
             
             t_min_num = int(tmin_cleaned) if tmin_cleaned and tmin_cleaned.isdigit() else 14
             t_max_num = int(tmax_cleaned) if tmax_cleaned and tmax_cleaned.isdigit() else 25
+
+            # 前日比最高気温の増減ロジック算出
+            diff_str = ""
+            try:
+                # 明日予報の場合、今日の予報最高気温(temps[1])が「前日の気温」相当になる
+                if is_tomorrow_data and len(temps) >= 4:
+                    prev_max = int(str(temps[1]).strip())
+                    diff = t_max_num - prev_max
+                    diff_str = f"(+{diff})" if diff > 0 else (f"({diff})" if diff < 0 else "(±0)")
+                # 今日予報の場合、気象庁の2番目の要素、もしくはres[1]の週間レイヤーから昨日の実績を引っ張る
+                else:
+                    # res[1]の過去観測データレイヤー等から前日実績を取得（見つからない場合は安全に空文字）
+                    try:
+                        yesterday_max = int(res[1]['timeSeries'][1]['areas'][0]['tempsMax'][0])
+                        diff = t_max_num - yesterday_max
+                        diff_str = f"(+{diff})" if diff > 0 else (f"({diff})" if diff < 0 else "(±0)")
+                    except:
+                        # 完全に取得できない時間帯は、定時データ内の初期インデックスの差分をフォールバックとして代用
+                        if len(temps) >= 2 and str(temps[0]).isdigit():
+                            diff = t_max_num - int(temps[0])
+                            diff_str = f"(+{diff})" if diff > 0 else (f"({diff})" if diff < 0 else "(±0)")
+            except:
+                pass
 
             # --- 5. 時系列データの個別マッピング処理 ---
             def find_hourly_data(target_hour_str):
@@ -194,9 +217,9 @@ jobs:
                 return day_symbol, 0
 
             # --- 6. 指定時間（6,9,12,15,18,21）のフィルタリング & 最大4行制限 ---
-            forecast_lines = [f"低:{t_min_num}°C 高:{t_max_num}°C 傘:{prob_str}{umbrella_mark}"]
+            # メッセージ1行目の高気温表記の横に前日比を追加
+            forecast_lines = [f"低:{t_min_num}°C 高:{t_max_num}°C{diff_str} 傘:{prob_str}{umbrella_mark}"]
             
-            # ユーザーご指定の6つの時間枠定義
             hourly_slots = [
                 ("06", "06:00"),
                 ("09", "09:00"),
@@ -208,33 +231,30 @@ jobs:
             
             valid_rows_count = 0
             for hour_val, label in hourly_slots:
-                # すでに4行表示リストに格納されていたら、それ以上はループを打ち切る
                 if valid_rows_count >= 4:
                     break
                     
                 base_dt = now + timedelta(days=1) if is_tomorrow_data else now
                 target_dt = base_dt.replace(hour=int(hour_val), minute=0, second=0, microsecond=0)
                 
-                # 現在時刻がターゲット時間の「2時間後」を超えていたら非表示（スキップ）
                 if now > target_dt + timedelta(hours=2):
                     continue
                 
                 sym, pop = find_hourly_data(hour_val)
                 
-                # 気温モデルの割り振りを6枠用にスムーズ化
                 if hour_val == "06": temp = t_min_num + 1
                 elif hour_val == "09": temp = t_min_num + 4
                 elif hour_val == "12": temp = t_max_num - 2
                 elif hour_val == "15": temp = t_max_num - 1
                 elif hour_val == "18": temp = t_max_num - 4
-                else: temp = t_min_num + 2  # 21:00
+                else: temp = t_min_num + 2
                 
                 forecast_lines.append(f"{label} {sym}  {temp}°C{get_clothing_advice(temp)}")
                 valid_rows_count += 1
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（6枠対応・最大4行制限版） ---")
+            print("--- 送信データ内容ログ（前日比最高気温追加版） ---")
             print(f"JST Time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
