@@ -173,8 +173,8 @@ jobs:
             t_min_num = int(tmin_cleaned) if tmin_cleaned and tmin_cleaned.isdigit() else 14
             t_max_num = int(tmax_cleaned) if tmax_cleaned and tmax_cleaned.isdigit() else 25
 
-            # --- 5. キャッシュ（履歴保存）を使った完全な前日比計算 ---
-            diff_str = ""
+            # --- 5. キャッシュを使った前日比計算（見つからない場合は「(?)」表示） ---
+            diff_str = "(?)"
             history_data = {}
             if os.path.exists(history_file):
                 try:
@@ -190,7 +190,7 @@ jobs:
                     diff = t_max_num - today_max
                     diff_str = f"(+{diff})" if diff > 0 else (f"({diff})" if diff < 0 else "(±0)")
                 except:
-                    pass
+                    diff_str = "(?)"
             else:
                 # 今日予報の時はキャッシュから「昨日」の最高気温を探す
                 yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
@@ -199,13 +199,11 @@ jobs:
                     diff = t_max_num - yesterday_max
                     diff_str = f"(+{diff})" if diff > 0 else (f"({diff})" if diff < 0 else "(±0)")
                 else:
-                    # 初回やキャッシュが切れたときのみフォールバック（日較差）
-                    diff = t_max_num - t_min_num
-                    diff_str = f"(+{diff})" if diff > 0 else (f"({diff})" if diff < 0 else "(±0)")
+                    # キャッシュが見つからない場合は一律で「(?)」にする
+                    diff_str = "(?)"
 
-            # 今回の最高気温データを履歴に保存（3日分だけ残す処理）
+            # 今回の最高気温データを履歴に保存して明日に繋げる
             history_data[target_date_str] = t_max_num
-            # 古いデータを整理
             clean_history = {k: v for k, v in history_data.items() if (now - datetime.strptime(k, "%Y-%m-%d").replace(tzinfo=jst)).days <= 3}
             with open(history_file, "w") as f:
                 json.dump(clean_history, f)
@@ -271,7 +269,7 @@ jobs:
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（履歴永続化・完全前日比版） ---")
+            print("--- 送信データ内容ログ（履歴永続化・厳密な前日比対応版） ---")
             print(f"JST Time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
