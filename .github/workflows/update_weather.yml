@@ -173,7 +173,7 @@ jobs:
             t_min_num = int(tmin_cleaned) if tmin_cleaned and tmin_cleaned.isdigit() else 14
             t_max_num = int(tmax_cleaned) if tmax_cleaned and tmax_cleaned.isdigit() else 25
 
-            # --- 5. キャッシュを使った前日比計算（見つからない場合は「(?)」表示） ---
+            # --- 5. キャッシュを使った厳密な前日比計算（バグ修正版） ---
             diff_str = "(?)"
             history_data = {}
             if os.path.exists(history_file):
@@ -184,26 +184,34 @@ jobs:
                     pass
 
             if is_tomorrow_data:
-                # 明日予報の時はJSON内に今日(temps[1])と明日(t_max_num)があるのでそのまま引き算
-                try:
-                    today_max = int(str(temps[1]).strip())
+                # 【明日予報モード】明日の最高気温 - 今日の最高気温（キャッシュから取得）
+                if today_date_str in history_data:
+                    today_max = history_data[today_date_str]
                     diff = t_max_num - today_max
                     diff_str = f"(+{diff})" if diff > 0 else (f"({diff})" if diff < 0 else "(±0)")
-                except:
-                    diff_str = "(?)"
+                else:
+                    # 今日昼のデータがキャッシュに残っていれば、予報データのセーフティフォールバック
+                    try:
+                        # 17時直後でインデックスがズレていなければtemps[1]を試す
+                        if len(temps) >= 4 and str(temps[1]).isdigit() and int(temps[1]) != t_max_num:
+                            diff = t_max_num - int(temps[1])
+                            diff_str = f"(+{diff})" if diff > 0 else (f"({diff})" if diff < 0 else "(±0)")
+                    except:
+                        pass
             else:
-                # 今日予報の時はキャッシュから「昨日」の最高気温を探す
+                # 【今日予報モード】今日の最高気温 - 昨日の最高気温（キャッシュから取得）
                 yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
                 if yesterday_str in history_data:
                     yesterday_max = history_data[yesterday_str]
                     diff = t_max_num - yesterday_max
                     diff_str = f"(+{diff})" if diff > 0 else (f"({diff})" if diff < 0 else "(±0)")
-                else:
-                    # キャッシュが見つからない場合は一律で「(?)」にする
-                    diff_str = "(?)"
 
-            # 今回の最高気温データを履歴に保存して明日に繋げる
+            # 今回のターゲット日付の最高気温データを履歴に保存
             history_data[target_date_str] = t_max_num
+            # 17時以降なら、確定した「今日の最高気温」も（消えていれば）直前の予報値ベースで履歴を補完
+            if is_tomorrow_data and today_date_str not in history_data:
+                if len(temps) >= 4: history_data[today_date_str] = int(temps[1])
+
             clean_history = {k: v for k, v in history_data.items() if (now - datetime.strptime(k, "%Y-%m-%d").replace(tzinfo=jst)).days <= 3}
             with open(history_file, "w") as f:
                 json.dump(clean_history, f)
@@ -269,7 +277,7 @@ jobs:
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（履歴永続化・厳密な前日比対応版） ---")
+            print("--- 送信データ内容ログ（17時以降インデックスバグ修正版） ---")
             print(f"JST Time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
