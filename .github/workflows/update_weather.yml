@@ -10,13 +10,15 @@ jobs:
   update-weather:
     runs-on: ubuntu-latest
     steps:
-    - name: Restore Last Run Hour Cache
+    - name: Restore Last Run Hour and Temp Cache
       uses: actions/cache@v4
       with:
-        path: last_run_hour.txt
-        key: weather-run-hour-cache-${{ github.run_id }}
+        path: |
+          last_run_hour.txt
+          weather_history.json
+        key: weather-run-cache-${{ github.run_id }}
         restore-keys: |
-          weather-run-hour-cache-
+          weather-run-cache-
 
     - name: Set up Python
       uses: actions/setup-python@v5
@@ -102,11 +104,13 @@ jobs:
                 label_head = "今日"
             
             day_idx = 1 if is_tomorrow_data else 0
-            target_date_str = (now + timedelta(days=1)).strftime("%Y-%m-%d") if is_tomorrow_data else now.strftime("%Y-%m-%d")
+            today_date_str = now.strftime("%Y-%m-%d")
+            target_date_str = (now + timedelta(days=1)).strftime("%Y-%m-%d") if is_tomorrow_data else today_date_str
 
             # --- GitHubのキャッシュファイルを用いた二重実行チェック ---
             current_hour_str = now.strftime("%Y-%m-%d-%H")
             cache_file = "last_run_hour.txt"
+            history_file = "weather_history.json"
             
             print("--- Actionsキャッシュによる二重実行チェック中 ---")
             if os.path.exists(cache_file):
@@ -149,7 +153,7 @@ jobs:
             day_symbol = get_advanced_weather_symbol(weather_text, max_prob)
             title_text = f"{label_head}の札幌市中央区: {day_symbol}"
 
-            # --- 4. 最高・最低気温と前日比の取得 (timeSeries[2]) ---
+            # --- 4. 最高・最低気温の取得 (timeSeries[2]) ---
             temp_series = res[0]['timeSeries'][2]
             temp_areas = temp_series['areas']
             sapporo_temp = next((a for a in temp_areas if a['area']['code'] == '016010'), temp_areas[0])
@@ -169,30 +173,44 @@ jobs:
             t_min_num = int(tmin_cleaned) if tmin_cleaned and tmin_cleaned.isdigit() else 14
             t_max_num = int(tmax_cleaned) if tmax_cleaned and tmax_cleaned.isdigit() else 25
 
-            # 前日比最高気温の増減ロジック算出
+            # --- 5. キャッシュ（履歴保存）を使った完全な前日比計算 ---
             diff_str = ""
-            try:
-                # 明日予報の場合、今日の予報最高気温(temps[1])が「前日の気温」相当になる
-                if is_tomorrow_data and len(temps) >= 4:
-                    prev_max = int(str(temps[1]).strip())
-                    diff = t_max_num - prev_max
-                    diff_str = f"(+{diff})" if diff > 0 else (f"({diff})" if diff < 0 else "(±0)")
-                # 今日予報の場合、気象庁の2番目の要素、もしくはres[1]の週間レイヤーから昨日の実績を引っ張る
-                else:
-                    # res[1]の過去観測データレイヤー等から前日実績を取得（見つからない場合は安全に空文字）
-                    try:
-                        yesterday_max = int(res[1]['timeSeries'][1]['areas'][0]['tempsMax'][0])
-                        diff = t_max_num - yesterday_max
-                        diff_str = f"(+{diff})" if diff > 0 else (f"({diff})" if diff < 0 else "(±0)")
-                    except:
-                        # 完全に取得できない時間帯は、定時データ内の初期インデックスの差分をフォールバックとして代用
-                        if len(temps) >= 2 and str(temps[0]).isdigit():
-                            diff = t_max_num - int(temps[0])
-                            diff_str = f"(+{diff})" if diff > 0 else (f"({diff})" if diff < 0 else "(±0)")
-            except:
-                pass
+            history_data = {}
+            if os.path.exists(history_file):
+                try:
+                    with open(history_file, "r") as f:
+                        history_data = json.load(f)
+                except:
+                    pass
 
-            # --- 5. 時系列データの個別マッピング処理 ---
+            if is_tomorrow_data:
+                # 明日予報の時はJSON内に今日(temps[1])と明日(t_max_num)があるのでそのまま引き算
+                try:
+                    today_max = int(str(temps[1]).strip())
+                    diff = t_max_num - today_max
+                    diff_str = f"(+{diff})" if diff > 0 else (f"({diff})" if diff < 0 else "(±0)")
+                except:
+                    pass
+            else:
+                # 今日予報の時はキャッシュから「昨日」の最高気温を探す
+                yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+                if yesterday_str in history_data:
+                    yesterday_max = history_data[yesterday_str]
+                    diff = t_max_num - yesterday_max
+                    diff_str = f"(+{diff})" if diff > 0 else (f"({diff})" if diff < 0 else "(±0)")
+                else:
+                    # 初回やキャッシュが切れたときのみフォールバック（日較差）
+                    diff = t_max_num - t_min_num
+                    diff_str = f"(+{diff})" if diff > 0 else (f"({diff})" if diff < 0 else "(±0)")
+
+            # 今回の最高気温データを履歴に保存（3日分だけ残す処理）
+            history_data[target_date_str] = t_max_num
+            # 古いデータを整理
+            clean_history = {k: v for k, v in history_data.items() if (now - datetime.strptime(k, "%Y-%m-%d").replace(tzinfo=jst)).days <= 3}
+            with open(history_file, "w") as f:
+                json.dump(clean_history, f)
+
+            # --- 6. 時系列データの個別マッピング処理 ---
             def find_hourly_data(target_hour_str):
                 if hourly_weather_codes and hourly_pops:
                     for t_str, code, pop in zip(hourly_times, hourly_weather_codes, hourly_pops):
@@ -216,8 +234,7 @@ jobs:
                             return sym, pop_val
                 return day_symbol, 0
 
-            # --- 6. 指定時間（6,9,12,15,18,21）のフィルタリング & 最大4行制限 ---
-            # メッセージ1行目の高気温表記の横に前日比を追加
+            # --- 7. 指定時間（6,9,12,15,18,21）のフィルタリング & 最大4行制限 ---
             forecast_lines = [f"低:{t_min_num}°C 高:{t_max_num}°C{diff_str} 傘:{prob_str}{umbrella_mark}"]
             
             hourly_slots = [
@@ -254,7 +271,7 @@ jobs:
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（前日比最高気温追加版） ---")
+            print("--- 送信データ内容ログ（履歴永続化・完全前日比版） ---")
             print(f"JST Time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
@@ -285,9 +302,11 @@ jobs:
             exit(1)
         EOF
 
-    - name: Save Run Hour Cache
+    - name: Save Run Hour and Temp Cache
       uses: actions/cache/save@v4
       if: success()
       with:
-        path: last_run_hour.txt
-        key: weather-run-hour-cache-${{ github.run_id }}
+        path: |
+          last_run_hour.txt
+          weather_history.json
+        key: weather-run-cache-${{ github.run_id }}
