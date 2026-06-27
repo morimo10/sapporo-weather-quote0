@@ -174,7 +174,7 @@ jobs:
             t_min_num = int(tmin_cleaned) if tmin_cleaned and tmin_cleaned.isdigit() else 14
             t_max_num = int(tmax_cleaned) if tmax_cleaned and tmax_cleaned.isdigit() else 25
 
-            # --- 5. キャッシュを使った厳密な前日比計算（バグ修正版） ---
+            # --- 5. キャッシュを使った厳密な前日比計算 ---
             diff_str = "(?)"
             history_data = {}
             if os.path.exists(history_file):
@@ -185,31 +185,25 @@ jobs:
                     pass
 
             if is_tomorrow_data:
-                # 【明日予報モード】明日の最高気温 - 今日の最高気温（キャッシュから取得）
                 if today_date_str in history_data:
                     today_max = history_data[today_date_str]
                     diff = t_max_num - today_max
                     diff_str = f"(+{diff})" if diff > 0 else (f"({diff})" if diff < 0 else "(±0)")
                 else:
-                    # 今日昼のデータがキャッシュに残っていれば、予報データのセーフティフォールバック
                     try:
-                        # 17時直後でインデックスがズレていなければtemps[1]を試す
                         if len(temps) >= 4 and str(temps[1]).isdigit() and int(temps[1]) != t_max_num:
                             diff = t_max_num - int(temps[1])
                             diff_str = f"(+{diff})" if diff > 0 else (f"({diff})" if diff < 0 else "(±0)")
                     except:
                         pass
             else:
-                # 【今日予報モード】今日の最高気温 - 昨日の最高気温（キャッシュから取得）
                 yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
                 if yesterday_str in history_data:
                     yesterday_max = history_data[yesterday_str]
                     diff = t_max_num - yesterday_max
                     diff_str = f"(+{diff})" if diff > 0 else (f"({diff})" if diff < 0 else "(±0)")
 
-            # 今回のターゲット日付の最高気温データを履歴に保存
             history_data[target_date_str] = t_max_num
-            # 17時以降なら、確定した「今日の最高気温」も（消えていれば）直前の予報値ベースで履歴を補完
             if is_tomorrow_data and today_date_str not in history_data:
                 if len(temps) >= 4: history_data[today_date_str] = int(temps[1])
 
@@ -241,7 +235,7 @@ jobs:
                             return sym, pop_val
                 return day_symbol, 0
 
-            # --- 7. 指定時間（6,9,12,15,18,21）のフィルタリング & 最大4行制限 ---
+            # --- 7. 指定時間のフィルタリング & 最大4行制限 ---
             forecast_lines = [f"低:{t_min_num}°C 高:{t_max_num}°C{diff_str} 傘:{prob_str}{umbrella_mark}"]
             
             hourly_slots = [
@@ -278,7 +272,7 @@ jobs:
             
             weather_message = "\n".join(forecast_lines)
             
-            print("--- 送信データ内容ログ（17時以降インデックスバグ修正版） ---")
+            print("--- 送信データ内容ログ ---")
             print(f"JST Time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
             print(f"Title  : {title_text}")
             print(f"Message:\n{weather_message}")
@@ -289,24 +283,21 @@ jobs:
                 "Content-Type": "application/json"
             }
             
-            # --- styles 内に fontWeight: bold を指定 ---
+            # --- bold設定を削除し、ChillRoundGothic本来の太さのみを適用 ---
             payload = {
                 "refreshNow": True,
                 "title": title_text,
                 "message": weather_message,
                 "styles": {
                     "title": {
-                        "fontFamily": "UnifontExMono16",
-                        "fontWeight": "bold"
+                        "fontFamily": "ChillRoundGothic"
                     },
                     "message": {
-                        "fontFamily": "UnifontExMono16",
-                        "fontWeight": "bold"
+                        "fontFamily": "ChillRoundGothic"
                     }
                 }
             }
             
-            # --- 一時的なネットワークエラーに対応するリトライ処理（最大3回） ---
             max_retries = 3
             for attempt in range(1, max_retries + 1):
                 try:
