@@ -290,7 +290,8 @@ jobs:
                 "message": weather_message,
                 "styles": {
                     "title": {
-                        "fontFamily": "ChillRoundGothic"
+                        "fontFamily": "ChillRoundGothic",
+                        "fontSize": 20
                     },
                     "message": {
                         "fontFamily": "ChillRoundGothic"
