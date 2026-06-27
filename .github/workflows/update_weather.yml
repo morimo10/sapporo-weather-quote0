@@ -288,16 +288,17 @@ jobs:
                 "Content-Type": "application/json"
             }
             
-            # --- ここで styles パラメータを使ってタイトルのフォントサイズを直接小さく（12px）制御しています ---
+            # --- タイトルとメッセージの両方にサイズなしの UnifontExMono16 を明示的に指定 ---
             payload = {
                 "refreshNow": True,
                 "title": title_text,
                 "message": weather_message,
                 "styles": {
                     "title": {
-                        "fontFamily": "UnifontExMono16",
-                        "fontSize": 12,
-                        "fontWeight": 700
+                        "fontFamily": "UnifontExMono16"
+                    },
+                    "message": {
+                        "fontFamily": "UnifontExMono16"
                     }
                 }
             }
