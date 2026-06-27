@@ -1,4 +1,4 @@
-name: Update Weather and Clothing for Dot V2 (Pure JMA Hourly Eco Version)
+Name: Update Weather and Clothing for Dot V2 (Pure JMA Hourly Eco Version)
 
 on:
   schedule:
@@ -287,11 +287,19 @@ jobs:
                 "Authorization": f"Bearer {API_KEY}",
                 "Content-Type": "application/json"
             }
+            
+            # --- ここで styles パラメータを使ってタイトルのフォントサイズを直接小さく（12px）制御しています ---
             payload = {
                 "refreshNow": True,
                 "title": title_text,
                 "message": weather_message,
-                "style": "UnifontExMono16"
+                "styles": {
+                    "title": {
+                        "fontFamily": "UnifontExMono16",
+                        "fontSize": 12,
+                        "fontWeight": 700
+                    }
+                }
             }
             
             response = requests.post(DOT_API_URL, headers=headers, json=payload)
