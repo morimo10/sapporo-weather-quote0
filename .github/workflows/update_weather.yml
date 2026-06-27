@@ -295,10 +295,10 @@ jobs:
                 "message": weather_message,
                 "styles": {
                     "title": {
-                        "fontFamily": "Unifont16"
+                        "fontFamily": "UnifontExMono16"
                     },
                     "message": {
-                        "fontFamily": "Unifont16"
+                        "fontFamily": "UnifontExMono16"
                     }
                 }
             }
