@@ -1,4 +1,4 @@
-Name: Update Weather and Clothing for Dot V2 (Pure JMA Hourly Eco Version)
+name: Update Weather and Clothing for Dot V2 (Pure JMA Hourly Eco Version)
 
 on:
   schedule:
