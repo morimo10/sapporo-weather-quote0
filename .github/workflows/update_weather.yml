@@ -291,7 +291,7 @@ jobs:
                 "styles": {
                     "title": {
                         "fontFamily": "ChillRoundGothic",
-                        "fontSize": 18
+                        "fontSize": 20
                     },
                     "message": {
                         "fontFamily": "ChillRoundGothic"
