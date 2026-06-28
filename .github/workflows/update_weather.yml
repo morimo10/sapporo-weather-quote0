@@ -152,7 +152,7 @@ jobs:
 
             # タイトル用お天気マークの生成
             day_symbol = get_advanced_weather_symbol(weather_text, max_prob)
-            title_text = f"{label_head}の札幌市中央区: {day_symbol}"
+            title_text = f"{label_head} 札幌市中央区 {day_symbol}"
 
             # --- 4. 最高・最低気温の取得 (timeSeries[2]) ---
             temp_series = res[0]['timeSeries'][2]
