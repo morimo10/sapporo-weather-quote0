@@ -2,11 +2,11 @@ name: update weather and clothing for dot v2 (pure jma hourly eco version)
 
 on:
   schedule:
-    # 日本時間 05:00〜21:59（UTC 20–23,0–11）
-    - cron: '17 0-11,20-23 * * *'
-    - cron: '37 0-11,20-23 * * *'
-    - cron: '47 0-11,20-23 * * *'
-    - cron: '53 0-11,20-23 * * *'
+    # 日本時間 06:00〜20:59（UTC 20–23,0–11）
+    - cron: '17 0-10,21-23 * * *'
+    - cron: '37 0-10,21-23 * * *'
+    - cron: '47 0-10,21-23 * * *'
+    - cron: '53 0-10,21-23 * * *'
   workflow_dispatch:
 
 # 多重実行防止
