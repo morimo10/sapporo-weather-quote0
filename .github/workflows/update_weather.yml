@@ -1,4 +1,4 @@
-name: Update Weather and Clothing for Dot V2 (Pure JMA Hourly Eco Version)
+name: update weather and clothing for dot v2 (pure jma hourly eco version)
 
 on:
   schedule:
@@ -14,9 +14,7 @@ concurrency:
   group: daytime-job
   cancel-in-progress: false
 
-# 60日停止回避のアクションを実行するために必要な権限を追加
 permissions:
-  actions: write
   contents: write
 
 jobs:
@@ -350,6 +348,11 @@ jobs:
           weather_history.json
         key: weather-run-cache-${{ github.run_id }}
 
-    # 一番最後に配置：60日間のアクティビティなしによるワークフロー自動サスペンド（停止）を防ぐ
-    - name: Keepalive Workflow (Prevent 60 days suspend)
-      uses: gautamkrishnar/keepalive-workflow@v1
+    # 外部アクションを呼び出さず、標準コマンドのみで週に1回空コミットをして60日停止を完全に防ぐ
+    - name: Keepalive (Prevent 60 days suspend)
+      if: github.event_name == 'schedule' && github.event.cron == '17 0 * * *'
+      run: |
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git commit --allow-empty -m "keepalive: prevent workflow suspension"
+        git push origin HEAD:${{ github.ref_name }}
