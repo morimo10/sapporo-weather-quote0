@@ -24,17 +24,17 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 1. 前回の実行時間と履歴ファイルをキャッシュから復元
+      # 1. 前回の実行時間と履歴ファイルをキャッシュから復元（修正箇所）
       - name: Restore Last Run Hour and Temp Cache
         uses: actions/cache/restore@v4
         with:
           path: |
             last_run_hour.txt
             weather_history.json
-          # 毎回一意のキーを生成し、restore-keys で直近の最新キャッシュを検索します
-          key: weather-run-cache-${{ github.run_id }}-${{ github.run_attempt }}
+          # 常に同じベースキーを最初に見に行き、部分一致で最新のキャッシュを復元します
+          key: weather-v2-cache-
           restore-keys: |
-            weather-run-cache-
+            weather-v2-cache-
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -46,7 +46,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      # 2. メイン処理の実行（Python内部で二重実行判定を行い、不要なら exit(0) で安全に終了します）
+      # 2. メイン処理の実行
       - name: Generate and Push to Dot API
         env:
           QUOTE0_API_KEY: ${{ secrets.QUOTE0_API_KEY }}
@@ -65,34 +65,20 @@ jobs:
           JMA_FORECAST_URL = "https://www.jma.go.jp/bosai/forecast/data/forecast/016000.json"
           DOT_API_URL = f"https://dot.mindreset.tech/api/authV2/open/device/{DEVICE_ID}/text"
 
-          # --- ここが修正されました：天気マークの「→」ロジックを復元 ---
           def get_advanced_weather_symbol(text, max_prob):
               if not text: return "☁"
-              
-              # 元のロジック：降水確率が30%未満の場合は、雨や雪を晴れや曇りに変換する
-              # しかし、今回は「→」のロジックそのものが失われていたため、
-              # 元のロジックに基づいて、天気マークを生成します。
-              
-              # 気象庁のテキストは「晴れ時々曇り」「雨後晴れ」のように、「時々」「のち」が含まれます。
-              # これをマークに変換します。
-              
-              # 特殊な表現に対応
               if "暴風雨" in text or "暴風雪" in text: return "⛄"
               if "雷" in text: return "⚡"
               
-              # メインの天気と、その後に続く天気、または時々を抽出する
               symbols = []
               if "晴" in text: symbols.append("☀")
               if "曇" in text: symbols.append("☁")
               if "雨" in text: symbols.append("☔")
               if "雪" in text: symbols.append("☃")
               
-              # マークの順序をテキストの出現順に並べ替える
               symbols.sort(key=lambda s: text.find(s))
               
               if len(symbols) >= 2:
-                  # 2つの天気マークがある場合、「のち」または「時々」に応じて「→」または「時々（|）」を追加する
-                  # ここでは、元のコードのように、単純に「→」で繋ぐようにします。
                   return f"{symbols[0]}→{symbols[1]}"
               elif len(symbols) == 1:
                   return symbols[0]
@@ -174,8 +160,6 @@ jobs:
               prob_str = f"{max_prob}%"
               umbrella_mark = "☔" if max_prob >= 50 else ("☂" if max_prob >= 30 else "")
 
-              # タイトル用お天気マークの生成
-              # ここで復元された「→」のロジックが適用されます
               day_symbol = get_advanced_weather_symbol(weather_text, max_prob)
               title_text = f"{label_head}札幌市中央区{day_symbol}"
 
@@ -252,7 +236,6 @@ jobs:
                               elif sym != "☔" and pop_val >= 60:
                                   sym = "☔"
                               return sym, pop_val
-                  # ここで、hourlyのデータがない場合はday_symbol（「→」を含む可能性があるもの）を使うようにします
                   return day_symbol, 0
 
               # --- 7. 指定時間のフィルタリング & 最大4行制限 ---
@@ -333,7 +316,7 @@ jobs:
               exit(1)
           EOF
 
-      # 3. 実行完了、またはスキップされた状態のファイルを次の実行のためにキャッシュ保存
+      # 3. 実行完了、またはスキップされた状態のファイルを次の実行のためにキャッシュ保存（修正箇所）
       - name: Save Run Hour and Temp Cache
         uses: actions/cache/save@v4
         if: success()
@@ -341,4 +324,5 @@ jobs:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-run-cache-${{ github.run_id }}-${{ github.run_attempt }}
+          # GitHub側がキャッシュを常に上書きできるよう、保存時はコミットSHA等を含めて毎回一意のキーにします
+          key: weather-v2-cache-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
