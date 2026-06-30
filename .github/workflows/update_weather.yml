@@ -41,20 +41,24 @@ jobs:
     - name: Check duplication in the same hour
       id: check-hour
       run: |
+        # 判定用（UTC）
         CURRENT_HOUR=$(date +%H)
-        echo "Current UTC Hour: $CURRENT_HOUR"
+
+        # ログ表示用（日本時間）
+        DISPLAY_HOUR_JST=$(TZ=Asia/Tokyo date +%H)
+
+        echo "現在の日本時間（時）: $DISPLAY_HOUR_JST"
 
         if [ -f last_run_hour.txt ] && [ "$(cat last_run_hour.txt)" = "$CURRENT_HOUR" ]; then
-          echo "Already executed in this hour. Skipping next steps."
+          echo "この時間帯ですでに実行されています。以降の処理をスキップします。"
           echo "skip=true" >> $GITHUB_OUTPUT
         else
-          echo "First execution in this hour. Proceeding."
+          echo "この時間帯での初回実行です。処理を続行します。"
           echo "$CURRENT_HOUR" > last_run_hour.txt
           echo "skip=false" >> $GITHUB_OUTPUT
         fi
 
     # --- 3. メインの処理ステップ（同じ時間帯の2回目以降ならスキップ） ---
-    # ※実際の実行コマンドやスクリプト（python や node、shなど）に合わせて書き換えてください。
     - name: Run Weather Update Script
       if: steps.check-hour.outputs.skip != 'true'
       run: |
