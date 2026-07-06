@@ -24,14 +24,13 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 1. 前回の実行時間と履歴ファイルをキャッシュから復元（修正箇所）
+      # 1. 前回の実行時間と履歴ファイルをキャッシュから復元
       - name: Restore Last Run Hour and Temp Cache
         uses: actions/cache/restore@v4
         with:
           path: |
             last_run_hour.txt
             weather_history.json
-          # 常に同じベースキーを最初に見に行き、部分一致で最新のキャッシュを復元します
           key: weather-v2-cache-
           restore-keys: |
             weather-v2-cache-
@@ -70,29 +69,43 @@ jobs:
               if "暴風雨" in text or "暴風雪" in text: return "⛄"
               if "雷" in text: return "⚡"
               
-              symbols = []
-              if "晴" in text: symbols.append("☀")
-              if "曇" in text: symbols.append("☁")
-              if "雨" in text: symbols.append("☔")
-              if "雪" in text: symbols.append("☃")
+              # 1. 漢字のテキストをもとに、登場する順番をチェックする
+              found_kanji = []
+              if "晴" in text: found_kanji.append("晴")
+              if "曇" in text: found_kanji.append("曇")
+              # 降水確率が30%未満の場合は、テキストに「雨」があってもマークから除外する
+              if "雨" in text and max_prob >= 30: found_kanji.append("雨")
+              if "雪" in text: found_kanji.append("雪")
               
-              symbols.sort(key=lambda s: text.find(s))
+              # 実際の文章に登場するインデックスの順に正しく並び替える
+              found_kanji.sort(key=lambda k: text.find(k))
+              
+              # 2. 漢字を絵文字にマッピング
+              kanji_to_emoji = {"晴": "☀", "曇": "☁", "雨": "☔", "雪": "☃"}
+              symbols = [kanji_to_emoji[k] for k in found_kanji]
               
               if len(symbols) >= 2:
                   return f"{symbols[0]}→{symbols[1]}"
               elif len(symbols) == 1:
                   return symbols[0]
               else:
+                  # 雨が除外されて空になった場合や、どれにも該当しない場合は「曇」
                   return "☁"
 
-          def code_to_symbol(code):
+          def code_to_symbol(code, pop_val=None):
               if not code or str(code).strip() == "": return "☁"
               try:
                   c = int(code)
-                  if 100 <= c < 200: return "☀"
-                  if 200 <= c < 300: return "☁"
-                  if 300 <= c < 400: return "☔"
-                  if 400 <= c < 500: return "☃"
+                  sym = "☁"
+                  if 100 <= c < 200: sym = "☀"
+                  elif 200 <= c < 300: sym = "☁"
+                  elif 300 <= c < 400: sym = "☔"
+                  elif 400 <= c < 500: sym = "☃"
+                  
+                  # 時系列のコード自体が「雨」でも、降水確率が30%未満なら曇りに補正する
+                  if sym == "☔" and pop_val is not None and pop_val < 30:
+                      return "☁"
+                  return sym
               except:
                   pass
               return "☁"
@@ -160,6 +173,7 @@ jobs:
               prob_str = f"{max_prob}%"
               umbrella_mark = "☔" if max_prob >= 50 else ("☂" if max_prob >= 30 else "")
 
+              # 降水確率が確定した後にメインシンボルを決定（ここで確率を反映）
               day_symbol = get_advanced_weather_symbol(weather_text, max_prob)
               title_text = f"{label_head}札幌市中央区{day_symbol}"
 
@@ -223,20 +237,17 @@ jobs:
                   if hourly_weather_codes and hourly_pops:
                       for t_str, code, pop in zip(hourly_times, hourly_weather_codes, hourly_pops):
                           dt_parsed = datetime.fromisoformat(t_str).astimezone(jst)
+                          # JMAの提供時間帯（例: 09:00の予報は09:00〜12:00をカバー）に適合するか判定
                           if dt_parsed.strftime("%Y-%m-%d") == target_date_str and dt_parsed.strftime("%H") == target_hour_str:
                               clean_code = str(code).strip()
                               clean_pop = str(pop).strip()
-                              sym = code_to_symbol(clean_code)
-                              if clean_pop and clean_pop.isdigit():
-                                  pop_val = int(clean_pop)
-                              else:
-                                  pop_val = 50 if sym == "☔" else 0
-                              if sym == "☔" and pop_val < 30:
-                                  sym = "☁"
-                              elif sym != "☔" and pop_val >= 60:
-                                  sym = "☔"
+                              pop_val = int(clean_pop) if (clean_pop and clean_pop.isdigit()) else 0
+                              
+                              # 確率を加味してコードをシンボルに変換
+                              sym = code_to_symbol(clean_code, pop_val)
                               return sym, pop_val
-                  return day_symbol, 0
+                  # 完全に一致するデータがない場合は、全体の代表マーク（day_symbol）を返す
+                  return day_symbol, max_prob
 
               # --- 7. 指定時間のフィルタリング & 最大4行制限 ---
               forecast_lines = [f"低:{t_min_num}°C 高:{t_max_num}°C{diff_str} 傘:{prob_str}{umbrella_mark}"]
@@ -316,7 +327,7 @@ jobs:
               exit(1)
           EOF
 
-      # 3. 実行完了、またはスキップされた状態のファイルを次の実行のためにキャッシュ保存（修正箇所）
+      # 3. 実行完了、またはスキップされた状態のファイルを次の実行のためにキャッシュ保存
       - name: Save Run Hour and Temp Cache
         uses: actions/cache/save@v4
         if: success()
@@ -324,5 +335,4 @@ jobs:
           path: |
             last_run_hour.txt
             weather_history.json
-          # GitHub側がキャッシュを常に上書きできるよう、保存時はコミットSHA等を含めて毎回一意のキーにします
           key: weather-v2-cache-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
