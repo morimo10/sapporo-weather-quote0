@@ -120,11 +120,17 @@ jobs:
               else: return " ダウン"
 
           try:
-              res = requests.get(JMA_FORECAST_URL).json()
               jst = timezone(timedelta(hours=9))
               now_utc = datetime.now(timezone.utc)
               now = now_utc.astimezone(jst)
               current_hour = now.hour
+
+              # 7時から21時まで（7:00 〜 21:59）の間のみ実行。それ以外はスキップ。
+              if current_hour < 7 or current_hour >= 22:
+                  print(f"現在の時刻は {now.strftime('%H:%M')} です。7時〜21時の時間外のため実行をスキップします。")
+                  exit(0)
+
+              res = requests.get(JMA_FORECAST_URL).json()
               if 17 <= current_hour <= 23:
                   is_tomorrow_data = True
                   label_head = "明日"
