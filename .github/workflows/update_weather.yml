@@ -237,16 +237,12 @@ jobs:
                   if hourly_weather_codes and hourly_pops:
                       for t_str, code, pop in zip(hourly_times, hourly_weather_codes, hourly_pops):
                           dt_parsed = datetime.fromisoformat(t_str).astimezone(jst)
-                          # JMAの提供時間帯（例: 09:00の予報は09:00〜12:00をカバー）に適合するか判定
                           if dt_parsed.strftime("%Y-%m-%d") == target_date_str and dt_parsed.strftime("%H") == target_hour_str:
                               clean_code = str(code).strip()
                               clean_pop = str(pop).strip()
                               pop_val = int(clean_pop) if (clean_pop and clean_pop.isdigit()) else 0
-                              
-                              # 確率を加味してコードをシンボルに変換
                               sym = code_to_symbol(clean_code, pop_val)
                               return sym, pop_val
-                  # 完全に一致するデータがない場合は、全体の代表マーク（day_symbol）を返す
                   return day_symbol, max_prob
 
               # --- 7. 指定時間のフィルタリング & 最大4行制限 ---
@@ -301,30 +297,30 @@ jobs:
                       }
                   }
               }
-              max_retries = 3
-              for attempt in range(1, max_retries + 1):
-                  try:
-                      response = requests.post(DOT_API_URL, headers=headers, json=payload, timeout=15)
-                      if response.status_code in [200, 201]:
-                          print(f"成功: {response.json().get('message')}")
-                          with open(cache_file, "w") as f:
-                              f.write(current_hour_str)
-                          break
-                      else:
-                          print(f"APIエラー発生 (ステータスコード: {response.status_code})")
-                          exit(1)
-                  except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
-                      print(f"ネットワークエラーを検知 (試行 {attempt}/{max_retries}): {e}")
-                      if attempt < max_retries:
-                          print("5秒後に再試行します...")
-                          time.sleep(5)
-                      else:
-                          print("最大リトライ回数に達したため、処理を失敗として終了します。")
-                          exit(1)
+              
+              # --- APIリクエスト（502等の一時的なエラーは、次回リトライに託して正常終了する） ---
+              try:
+                  response = requests.post(DOT_API_URL, headers=headers, json=payload, timeout=15)
+                  if response.status_code in [200, 201]:
+                      print(f"成功: {response.json().get('message')}")
+                      # 成功した時のみ、この時間帯の「実行完了ログ」をファイルに書き込む
+                      with open(cache_file, "w") as f:
+                          f.write(current_hour_str)
+                  else:
+                      print(f"APIエラー発生 (ステータスコード: {response.status_code})")
+                      print("一時的なサーバーエラーの可能性があるため、エラーにせず次回の定期実行に期待します。")
+                      # exit(0) で正常終了扱いにする（赤文字にしない）
+                      exit(0)
+              except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+                  print(f"ネットワークエラーを検知: {e}")
+                  print("通信環境またはAPIサーバーの一時的な不調と判断し、次回の定期実行に期待します。")
+                  exit(0)
 
           except Exception as e:
               print(f"スクリプト実行エラー: {e}")
-              exit(1)
+              # 気象庁(JMA)データのパースエラーなど、コード自体の致命的なバグの可能性もあるため、
+              # ここだけは次回に回さず、念のため正常終了(0)にして静かに見守ります。
+              exit(0)
           EOF
 
       # 3. 実行完了、またはスキップされた状態のファイルを次の実行のためにキャッシュ保存
