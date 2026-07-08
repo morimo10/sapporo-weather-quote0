@@ -45,7 +45,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      # 2. メイン処理の実行（時系列の雷マークを廃止し、タイトルのみに限定）
+      # 2. メイン処理の実行（時系列の天気記号の幅を全角3文字分に固定して桁数統一）
       - name: Generate and Push to Dot API
         env:
           QUOTE0_API_KEY: ${{ secrets.QUOTE0_API_KEY }}
@@ -96,15 +96,23 @@ jobs:
                 if not code or str(code).strip() == "": return "☁"
                 try:
                     c = int(code)
-                    sym = "☁"
-                    if 100 <= c < 200: sym = "☀"
-                    elif 200 <= c < 300: sym = "☁"
-                    elif 300 <= c < 400: sym = "☔"
-                    elif 400 <= c < 500: sym = "☃"
+                    primary = c // 100
+                    join_type = (c % 100) // 10
+                    join_char = "→" if join_type == 1 else "／"
                     
-                    if sym == "☔" and pop_val is not None and pop_val < 30:
-                        return "☁"
-                    return sym
+                    num_to_emoji = {1: "☀", 2: "☁", 3: "☔", 4: "☃"}
+                    sym1 = num_to_emoji.get(primary, "☁")
+                    
+                    sub_idx = c % 10
+                    sym2 = num_to_emoji.get(sub_idx, "")
+                    
+                    if pop_val is not None and pop_val < 30:
+                        if sym1 == "☔": sym1 = "☁"
+                        if sym2 == "☔": sym2 = "☁"
+                    
+                    if sym2 and sym1 != sym2:
+                        return f"{sym1}{join_char}{sym2}"
+                    return sym1
                 except:
                     pass
                 return "☁"
@@ -231,7 +239,6 @@ jobs:
                 with open(history_file, "w") as f:
                     json.dump(clean_history, f)
 
-                # 【修正】時系列データ判定：3時間ごとの予報からは雷（⚡）を完全に除外し基本記号のみにする
                 def find_hourly_data(target_hour_str):
                     if hourly_weather_codes and hourly_pops:
                         for t_str, code, pop in zip(hourly_times, hourly_weather_codes, hourly_pops):
@@ -241,7 +248,6 @@ jobs:
                                 clean_pop = str(pop).strip()
                                 pop_val = int(clean_pop) if (clean_pop and clean_pop.isdigit()) else 0
                                 
-                                # 時系列は常に基本4種の記号（☀・☁・☔・☃）のみを返し、機械的な⚡付与を行わない
                                 sym = code_to_symbol(clean_code, pop_val)
                                 return sym, pop_val
                     return day_symbol, max_prob
@@ -272,7 +278,18 @@ jobs:
                     else: temp = t_min_num + 2
                     
                     temp_str = f"{temp:02d}"
-                    forecast_lines.append(f"{label} {sym} {temp_str}°C{get_clothing_advice(temp)}")
+                    
+                    # 【修正】全角スペース（\u3000）を使って、天気の幅を「全角3文字分」に完全固定（桁数統一）
+                    # 1文字（例: ☁）の時は後ろに全角2枚、3文字（例: ☁→☔）の時は追加なし
+                    sym_len = len(sym)
+                    if sym_len == 1:
+                        padded_sym = sym + "　　"
+                    elif sym_len == 2:
+                        padded_sym = sym + "　"
+                    else:
+                        padded_sym = sym
+                        
+                    forecast_lines.append(f"{label} {padded_sym} {temp_str}°C{get_clothing_advice(temp)}")
                     valid_rows_count += 1
                 weather_message = "\n".join(forecast_lines)
                 print("--- 送信データ内容ログ ---")
