@@ -45,7 +45,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      # 2. メイン処理の実行（時系列の天気記号の幅を全角3文字分に固定して桁数統一）
+      # 2. メイン処理の実行（時系列への雷マークの混入・引き継ぎを完全に遮断）
       - name: Generate and Push to Dot API
         env:
           QUOTE0_API_KEY: ${{ secrets.QUOTE0_API_KEY }}
@@ -239,6 +239,7 @@ jobs:
                 with open(history_file, "w") as f:
                     json.dump(clean_history, f)
 
+                # 時系列データ判定
                 def find_hourly_data(target_hour_str):
                     if hourly_weather_codes and hourly_pops:
                         for t_str, code, pop in zip(hourly_times, hourly_weather_codes, hourly_pops):
@@ -250,7 +251,9 @@ jobs:
                                 
                                 sym = code_to_symbol(clean_code, pop_val)
                                 return sym, pop_val
-                    return day_symbol, max_prob
+                    # 【修正】データ不一致でフォールバックした場合、雷マーク（／⚡）を除去したスッキリした基本天気を使う
+                    fallback_sym = day_symbol.replace("／⚡", "").replace("⚡", "")
+                    return fallback_sym, max_prob
 
                 forecast_lines = [f"低:{t_min_num}°C 高:{t_max_num}°C{diff_str} 傘:{prob_str}{umbrella_mark}"]
                 hourly_slots = [
@@ -279,8 +282,7 @@ jobs:
                     
                     temp_str = f"{temp:02d}"
                     
-                    # 【修正】全角スペース（\u3000）を使って、天気の幅を「全角3文字分」に完全固定（桁数統一）
-                    # 1文字（例: ☁）の時は後ろに全角2枚、3文字（例: ☁→☔）の時は追加なし
+                    # 天気の幅を「全角3文字分」に完全固定（桁数統一）
                     sym_len = len(sym)
                     if sym_len == 1:
                         padded_sym = sym + "　　"
