@@ -67,6 +67,44 @@ jobs:
           def get_advanced_weather_symbol(text, max_prob):
               if not text: return "☁"
               if "暴風雨" in text or "暴風雪" in text: return "⛄"
+              
+              # 1. 漢字のテキストをもとに、登場する順番をチェックする
+              found_kanji = []
+              if "晴" in text: found_kanji.append("晴")
+              if "曇"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
+      # 2. メイン処理の実行
+      - name: Generate and Push to Dot API
+        env:
+          QUOTE0_API_KEY: ${{ secrets.QUOTE0_API_KEY }}
+          QUOTE0_DEVICE_ID: ${{ secrets.QUOTE0_DEVICE_ID }}
+        run: |
+          python - << 'EOF'
+          import os
+          import json
+          import time
+          import requests
+          from datetime import datetime, timedelta, timezone
+
+          API_KEY = os.environ.get("QUOTE0_API_KEY")
+          DEVICE_ID = os.environ.get("QUOTE0_DEVICE_ID")
+
+          JMA_FORECAST_URL = "https://www.jma.go.jp/bosai/forecast/data/forecast/016000.json"
+          DOT_API_URL = f"https://dot.mindreset.tech/api/authV2/open/device/{DEVICE_ID}/text"
+
+          def get_advanced_weather_symbol(text, max_prob):
+              if not text: return "☁"
+              if "暴風雨" in text or "暴風雪" in text: return "⛄"
               if "雷" in text: return "⚡"
               
               # 1. 漢字のテキストをもとに、登場する順番をチェックする
