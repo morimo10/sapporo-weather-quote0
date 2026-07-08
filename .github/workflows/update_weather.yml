@@ -45,7 +45,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      # 2. メイン処理の実行（'EOF' で囲うことで、% やインデントのエラーを根本から防ぎます）
+      # 2. メイン処理の実行（Actionsのパースエラーを防ぐため、% を %% に修正しました）
       - name: Generate and Push to Dot API
         env:
           QUOTE0_API_KEY: ${{ secrets.QUOTE0_API_KEY }}
@@ -129,7 +129,7 @@ jobs:
 
               # 7時から21時まで（7:00 〜 21:59）の間のみ実行。それ以外はスキップ。
               if current_hour < 7 or current_hour >= 22:
-                  print(f"現在の時刻は {now.strftime('%H:%M')} です。7時〜21時の時間外のため実行をスキップします。")
+                  print(f"現在の時刻は {now.strftime('%%H:%%M')} です。7時〜21時の時間外のため実行をスキップします。")
                   exit(0)
 
               res = requests.get(JMA_FORECAST_URL).json()
@@ -140,11 +140,11 @@ jobs:
                   is_tomorrow_data = False
                   label_head = "今日"
               day_idx = 1 if is_tomorrow_data else 0
-              today_date_str = now.strftime("%Y-%m-%d")
-              target_date_str = (now + timedelta(days=1)).strftime("%Y-%m-%d") if is_tomorrow_data else today_date_str
+              today_date_str = now.strftime("%%Y-%%m-%%d")
+              target_date_str = (now + timedelta(days=1)).strftime("%%Y-%%m-%%d") if is_tomorrow_data else today_date_str
 
               # --- GitHubのキャッシュファイルを用いた二重実行チェック ---
-              current_hour_str = now.strftime("%Y-%m-%d-%H")
+              current_hour_str = now.strftime("%%Y-%%m-%%d-%%H")
               cache_file = "last_run_hour.txt"
               history_file = "weather_history.json"
               print("--- Actionsキャッシュによる二重実行チェック中 ---")
@@ -152,10 +152,10 @@ jobs:
                   with open(cache_file, "r") as f:
                       last_run_hour = f.read().strip()
                   if last_run_hour == current_hour_str:
-                      print(f"判別結果: すでに【{now.strftime('%H:00')}時台】の最初の実行は完了しています。")
+                      print(f"判別結果: すでに【{now.strftime('%%H:00')}時台】の最初の実行は完了しています。")
                       print("送信をスキップ（パス）して正常終了します。")
                       exit(0)
-              print(f"判別結果: 新しい時間帯【{now.strftime('%H:00')}時台】の初実行です。処理を進めます。")
+              print(f"判別結果: 新しい時間帯【{now.strftime('%%H:00')}時台】の初実行です。処理を進めます。")
 
               # --- 1. 1日単位の基本天気予報 (timeSeries[0]) ---
               base_series = res[0]['timeSeries'][0]
@@ -175,7 +175,7 @@ jobs:
               day_pops = []
               for t_str, pop in zip(hourly_times, hourly_pops):
                   dt_parsed = datetime.fromisoformat(t_str).astimezone(jst)
-                  if dt_parsed.strftime("%Y-%m-%d") == target_date_str and str(pop).strip() != "":
+                  if dt_parsed.strftime("%%Y-%%m-%%d") == target_date_str and str(pop).strip() != "":
                       day_pops.append(int(pop))
               max_prob = max(day_pops) if day_pops else 0
               prob_str = f"{max_prob}%"
@@ -193,11 +193,4 @@ jobs:
               tmin_raw = temps[2] if is_tomorrow_data and len(temps) >= 4 else (temps[0] if len(temps) > 0 else "14")
               tmax_raw = temps[3] if is_tomorrow_data and len(temps) >= 4 else (temps[1] if len(temps) > 1 else "25")
 
-              if not is_tomorrow_data and (not tmin_raw or str(tmin_raw).strip() == "" or tmin_raw == tmax_raw):
-                  try:
-                      tmin_raw = res[1]['timeSeries'][1]['areas'][0]['tempsMin'][0]
-                  except:
-                      tmin_raw = "14"
-              if not tmax_raw or str(tmax_raw).strip() == "": tmax_raw = "25"
-
-              tmin_
+              if not is_tomorrow_data and (not tmin_raw or str(tmin_raw).strip() == ""
