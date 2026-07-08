@@ -45,7 +45,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      # 2. メイン処理の実行（時系列への雷マークの混入・引き継ぎを完全に遮断）
+      # 2. メイン処理の実行（天気記号と気温の重なりを物理的に防止するスペース調整）
       - name: Generate and Push to Dot API
         env:
           QUOTE0_API_KEY: ${{ secrets.QUOTE0_API_KEY }}
@@ -251,7 +251,6 @@ jobs:
                                 
                                 sym = code_to_symbol(clean_code, pop_val)
                                 return sym, pop_val
-                    # 【修正】データ不一致でフォールバックした場合、雷マーク（／⚡）を除去したスッキリした基本天気を使う
                     fallback_sym = day_symbol.replace("／⚡", "").replace("⚡", "")
                     return fallback_sym, max_prob
 
@@ -282,16 +281,19 @@ jobs:
                     
                     temp_str = f"{temp:02d}"
                     
-                    # 天気の幅を「全角3文字分」に完全固定（桁数統一）
+                    # 【修正】全角・半角スペースの認識問題をクリアするため、安全な条件分岐に刷新
+                    # 記号の最大長さを3文字（全角）と見なし、それ未満なら確実に半角スペースを付与
                     sym_len = len(sym)
                     if sym_len == 1:
-                        padded_sym = sym + "　　"
+                        # 1文字（例: ☁）の時は、全角2枚分の等価スペースを確保して半角1枚開ける
+                        padded_sym = sym + "　　 "
                     elif sym_len == 2:
-                        padded_sym = sym + "　"
+                        padded_sym = sym + "　  "
                     else:
-                        padded_sym = sym
+                        # 3文字（例: ☁→☔）の時は、直後に必ず半角スペース2枚を開けて重なりを物理遮断
+                        padded_sym = sym + "  "
                         
-                    forecast_lines.append(f"{label} {padded_sym} {temp_str}°C{get_clothing_advice(temp)}")
+                    forecast_lines.append(f"{label} {padded_sym}{temp_str}°C{get_clothing_advice(temp)}")
                     valid_rows_count += 1
                 weather_message = "\n".join(forecast_lines)
                 print("--- 送信データ内容ログ ---")
