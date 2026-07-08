@@ -45,12 +45,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      # 2. メイン処理の実行（Actionsによるコード破壊を防ぐため、一度 env に格納して実行します）
+      # 2. メイン処理の実行（雷マークも降水確率30%未満なら非表示にするロジックに修正）
       - name: Generate and Push to Dot API
         env:
           QUOTE0_API_KEY: ${{ secrets.QUOTE0_API_KEY }}
           QUOTE0_DEVICE_ID: ${{ secrets.QUOTE0_DEVICE_ID }}
-          # Pythonコードを文字列として環境変数に格納することで、Actionsパーサーの干渉を100%防ぎます
           PYTHON_SCRIPT: |
             import os
             import json
@@ -71,6 +70,7 @@ jobs:
                 found_kanji = []
                 if "晴" in text: found_kanji.append("晴")
                 if "曇" in text: found_kanji.append("曇")
+                # 降水確率が30%未満の場合は、テキストに「雨」があっても除外
                 if "雨" in text and max_prob >= 30: found_kanji.append("雨")
                 if "雪" in text: found_kanji.append("雪")
                 
@@ -86,7 +86,8 @@ jobs:
                 else:
                     base_sym = "☁"
                     
-                if "雷" in text:
+                # 【修正】降水確率が30%未満のときは、「所により」の雷リスクも無視して⚡を付けない
+                if "雷" in text and max_prob >= 30:
                     return f"{base_sym}⚡"
                 return base_sym
 
@@ -100,6 +101,7 @@ jobs:
                     elif 300 <= c < 400: sym = "☔"
                     elif 400 <= c < 500: sym = "☃"
                     
+                    # 時系列のコード自体が「雨」でも、降水確率が30%未満なら曇りに補正する
                     if sym == "☔" and pop_val is not None and pop_val < 30:
                         return "☁"
                     return sym
@@ -171,6 +173,7 @@ jobs:
                 prob_str = f"{max_prob}%"
                 umbrella_mark = "☔" if max_prob >= 50 else ("☂" if max_prob >= 30 else "")
 
+                # 降水確率が確定した後にメインシンボルを決定（確率連動）
                 day_symbol = get_advanced_weather_symbol(weather_text, max_prob)
                 title_text = f"{label_head}札幌市中央区{day_symbol}"
 
@@ -229,6 +232,7 @@ jobs:
                 with open(history_file, "w") as f:
                     json.dump(clean_history, f)
 
+                # 時系列データの個別マッピング処理（雷も確率を見て補正）
                 def find_hourly_data(target_hour_str):
                     if hourly_weather_codes and hourly_pops:
                         for t_str, code, pop in zip(hourly_times, hourly_weather_codes, hourly_pops):
@@ -238,6 +242,10 @@ jobs:
                                 clean_pop = str(pop).strip()
                                 pop_val = int(clean_pop) if (clean_pop and clean_pop.isdigit()) else 0
                                 sym = code_to_symbol(clean_code, pop_val)
+                                
+                                # 時系列データのアイコンに「雷」の文字判定はないため、基本シンボルに合わせるか、コードが雷雨系かつ確率30%以上なら⚡を足す
+                                if clean_code in ["112", "113", "114", "212", "213", "214", "314", "315"] and pop_val >= 30:
+                                    sym = f"{sym}⚡"
                                 return sym, pop_val
                     return day_symbol, max_prob
 
@@ -323,4 +331,3 @@ jobs:
             last_run_hour.txt
             weather_history.json
           key: weather-v2-cache-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
- 
