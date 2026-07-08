@@ -45,7 +45,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      # 2. メイン処理の実行（天気記号と気温の重なりを物理的に防止するスペース調整）
+      # 2. メイン処理の実行（気象庁アクセス時のネットワークエラーの安全処理を追加）
       - name: Generate and Push to Dot API
         env:
           QUOTE0_API_KEY: ${{ secrets.QUOTE0_API_KEY }}
@@ -136,7 +136,14 @@ jobs:
                     print(f"現在の時刻は {now.strftime('%H:%M')} です。7時〜21時の時間外のため実行をスキップします。")
                     exit(0)
 
-                res = requests.get(JMA_FORECAST_URL).json()
+                # 【修正】気象庁へのアクセス時にもネットワーク接続・名前解決エラーの補足用安全ガードを配置
+                try:
+                    res = requests.get(JMA_FORECAST_URL, timeout=15).json()
+                except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+                    print(f"気象庁サーバーへの接続または名前解決に失敗しました(一時的な環境不調): {e}")
+                    print("エラーにせずスキップ処理とし、次回の定期実行（15分後など）に期待します。")
+                    exit(0)
+
                 if 17 <= current_hour <= 23:
                     is_tomorrow_data = True
                     label_head = "明日"
@@ -239,7 +246,6 @@ jobs:
                 with open(history_file, "w") as f:
                     json.dump(clean_history, f)
 
-                # 時系列データ判定
                 def find_hourly_data(target_hour_str):
                     if hourly_weather_codes and hourly_pops:
                         for t_str, code, pop in zip(hourly_times, hourly_weather_codes, hourly_pops):
@@ -281,16 +287,12 @@ jobs:
                     
                     temp_str = f"{temp:02d}"
                     
-                    # 【修正】全角・半角スペースの認識問題をクリアするため、安全な条件分岐に刷新
-                    # 記号の最大長さを3文字（全角）と見なし、それ未満なら確実に半角スペースを付与
                     sym_len = len(sym)
                     if sym_len == 1:
-                        # 1文字（例: ☁）の時は、全角2枚分の等価スペースを確保して半角1枚開ける
                         padded_sym = sym + "　　 "
                     elif sym_len == 2:
                         padded_sym = sym + "　  "
                     else:
-                        # 3文字（例: ☁→☔）の時は、直後に必ず半角スペース2枚を開けて重なりを物理遮断
                         padded_sym = sym + "  "
                         
                     forecast_lines.append(f"{label} {padded_sym}{temp_str}°C{get_clothing_advice(temp)}")
