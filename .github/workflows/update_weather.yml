@@ -45,7 +45,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      # 2. メイン処理の実行（気象庁アクセス時のネットワークエラーの安全処理を追加）
+      # 2. メイン処理の実行（フォールバック時も曇のち雨を正しく「☁→☔」に変換する修正版）
       - name: Generate and Push to Dot API
         env:
           QUOTE0_API_KEY: ${{ secrets.QUOTE0_API_KEY }}
@@ -136,12 +136,10 @@ jobs:
                     print(f"現在の時刻は {now.strftime('%H:%M')} です。7時〜21時の時間外のため実行をスキップします。")
                     exit(0)
 
-                # 【修正】気象庁へのアクセス時にもネットワーク接続・名前解決エラーの補足用安全ガードを配置
                 try:
                     res = requests.get(JMA_FORECAST_URL, timeout=15).json()
                 except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
-                    print(f"気象庁サーバーへの接続または名前解決に失敗しました(一時的な環境不調): {e}")
-                    print("エラーにせずスキップ処理とし、次回の定期実行（15分後など）に期待します。")
+                    print(f"気象庁サーバーへの接続または名前解決に失敗しました: {e}")
                     exit(0)
 
                 if 17 <= current_hour <= 23:
@@ -163,7 +161,6 @@ jobs:
                         last_run_hour = f.read().strip()
                     if last_run_hour == current_hour_str:
                         print(f"判別結果: すでに【{now.strftime('%H:00')}時台】の最初の実行は完了しています。")
-                        print("送信をスキップ（パス）して正常終了します。")
                         exit(0)
                 print(f"判別結果: 新しい時間帯【{now.strftime('%H:00')}時台】の初実行です。処理を進めます。")
 
@@ -246,6 +243,7 @@ jobs:
                 with open(history_file, "w") as f:
                     json.dump(clean_history, f)
 
+                # 時系列データ判定
                 def find_hourly_data(target_hour_str):
                     if hourly_weather_codes and hourly_pops:
                         for t_str, code, pop in zip(hourly_times, hourly_weather_codes, hourly_pops):
@@ -257,7 +255,8 @@ jobs:
                                 
                                 sym = code_to_symbol(clean_code, pop_val)
                                 return sym, pop_val
-                    fallback_sym = day_symbol.replace("／⚡", "").replace("⚡", "")
+                    # 【修正】データ不一致時のフォールバックでも「曇後雨」を正しく解釈し、雷⚡だけを除去した「☁→☔」を安全に生成
+                    fallback_sym = get_advanced_weather_symbol(weather_text, max_prob).replace("／⚡", "").replace("⚡", "")
                     return fallback_sym, max_prob
 
                 forecast_lines = [f"低:{t_min_num}°C 高:{t_max_num}°C{diff_str} 傘:{prob_str}{umbrella_mark}"]
@@ -331,11 +330,9 @@ jobs:
                             f.write(current_hour_str)
                     else:
                         print(f"APIエラー発生 (ステータスコード: {response.status_code})")
-                        print("一時的なサーバーエラーの可能性があるため、エラーにせず次回の定期実行に期待します。")
                         exit(0)
                 except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
                     print(f"ネットワークエラーを検知: {e}")
-                    print("通信環境またはAPIサーバーの一時的な不調と判断し、次回の定期実行に期待します。")
                     exit(0)
 
             except Exception as e:
