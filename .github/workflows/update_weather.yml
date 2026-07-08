@@ -45,7 +45,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      # 2. メイン処理の実行（矢印・スラッシュ記号化 ＆ 気温の2桁統一化）
+      # 2. メイン処理の実行（時系列の雷マークを廃止し、タイトルのみに限定）
       - name: Generate and Push to Dot API
         env:
           QUOTE0_API_KEY: ${{ secrets.QUOTE0_API_KEY }}
@@ -77,7 +77,6 @@ jobs:
                 kanji_to_emoji = {"晴": "☀", "曇": "☁", "雨": "☔", "雪": "☃"}
                 symbols = [kanji_to_emoji[k] for k in found_kanji]
                 
-                # 記号の繋ぎ目を「後」なら「→」、「時々/一時」なら「／」に動的判定
                 join_char = "／"
                 if "後" in text:
                     join_char = "→"
@@ -89,7 +88,6 @@ jobs:
                 else:
                     base_sym = "☁"
                     
-                # 降水確率30%以上で「雷」がある場合は「／⚡」を付与
                 if "雷" in text and max_prob >= 30:
                     return f"{base_sym}／⚡"
                 return base_sym
@@ -233,6 +231,7 @@ jobs:
                 with open(history_file, "w") as f:
                     json.dump(clean_history, f)
 
+                # 【修正】時系列データ判定：3時間ごとの予報からは雷（⚡）を完全に除外し基本記号のみにする
                 def find_hourly_data(target_hour_str):
                     if hourly_weather_codes and hourly_pops:
                         for t_str, code, pop in zip(hourly_times, hourly_weather_codes, hourly_pops):
@@ -241,15 +240,12 @@ jobs:
                                 clean_code = str(code).strip()
                                 clean_pop = str(pop).strip()
                                 pop_val = int(clean_pop) if (clean_pop and clean_pop.isdigit()) else 0
-                                sym = code_to_symbol(clean_code, pop_val)
                                 
-                                # コードが雷雨系かつ確率30%以上ならスラッシュ付きの「／⚡」で合成
-                                if clean_code in ["112", "113", "114", "212", "213", "214", "314", "315"] and pop_val >= 30:
-                                    sym = f"{sym}／⚡"
+                                # 時系列は常に基本4種の記号（☀・☁・☔・☃）のみを返し、機械的な⚡付与を行わない
+                                sym = code_to_symbol(clean_code, pop_val)
                                 return sym, pop_val
                     return day_symbol, max_prob
 
-                # タイトル行（1行目）の気温表示
                 forecast_lines = [f"低:{t_min_num}°C 高:{t_max_num}°C{diff_str} 傘:{prob_str}{umbrella_mark}"]
                 hourly_slots = [
                     ("06", "06:00"),
@@ -275,9 +271,7 @@ jobs:
                     elif hour_val == "18": temp = t_max_num - 4
                     else: temp = t_min_num + 2
                     
-                    # 【修正】気温の桁数を 2桁（例: 09°C や 23°C）に揃える
                     temp_str = f"{temp:02d}"
-                    
                     forecast_lines.append(f"{label} {sym} {temp_str}°C{get_clothing_advice(temp)}")
                     valid_rows_count += 1
                 weather_message = "\n".join(forecast_lines)
@@ -297,11 +291,11 @@ jobs:
                     "message": weather_message,
                     "styles": {
                         "title": {
-                            "fontFamily": "ChillRoundGothic",
-                            "fontSize": 24
+                          "fontFamily": "ChillRoundGothic",
+                          "fontSize": 24
                         },
                         "message": {
-                            "fontFamily": "ChillRoundGothic"
+                          "fontFamily": "ChillRoundGothic"
                         }
                     }
                 }
