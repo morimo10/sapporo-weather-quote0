@@ -45,270 +45,270 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      # 2. 衝突を避けるため、一度別ファイルに Python コードを書き出す
+      # 2. 安全にPythonファイルを作成（インデント干渉を完全に排除）
       - name: Create Python Script
         run: |
           cat << 'EOF' > weather_script.py
-          import os
-          import json
-          import time
-          import requests
-          from datetime import datetime, timedelta, timezone
+import os
+import json
+import time
+import requests
+from datetime import datetime, timedelta, timezone
 
-          API_KEY = os.environ.get("QUOTE0_API_KEY")
-          DEVICE_ID = os.environ.get("QUOTE0_DEVICE_ID")
+API_KEY = os.environ.get("QUOTE0_API_KEY")
+DEVICE_ID = os.environ.get("QUOTE0_DEVICE_ID")
 
-          JMA_FORECAST_URL = "https://www.jma.go.jp/bosai/forecast/data/forecast/016000.json"
-          DOT_API_URL = f"https://dot.mindreset.tech/api/authV2/open/device/{DEVICE_ID}/text"
+JMA_FORECAST_URL = "https://www.jma.go.jp/bosai/forecast/data/forecast/016000.json"
+DOT_API_URL = f"https://dot.mindreset.tech/api/authV2/open/device/{DEVICE_ID}/text"
 
-          def get_advanced_weather_symbol(text, max_prob):
-              if not text: return "☁"
-              if "暴風雨" in text or "暴風雪" in text: return "⛄"
-              
-              found_kanji = []
-              if "晴" in text: found_kanji.append("晴")
-              if "曇" in text: found_kanji.append("曇")
-              if "雨" in text and max_prob >= 30: found_kanji.append("雨")
-              if "雪" in text: found_kanji.append("雪")
-              
-              found_kanji.sort(key=lambda k: text.find(k))
-              
-              kanji_to_emoji = {"晴": "☀", "曇": "☁", "雨": "☔", "雪": "☃"}
-              symbols = [kanji_to_emoji[k] for k in found_kanji]
-              
-              if len(symbols) >= 2:
-                  base_sym = f"{symbols[0]}→{symbols[1]}"
-              elif len(symbols) == 1:
-                  base_sym = symbols[0]
-              else:
-                  base_sym = "☁"
-                  
-              if "雷" in text:
-                  return f"{base_sym}⚡"
-              return base_sym
+def get_advanced_weather_symbol(text, max_prob):
+    if not text: return "☁"
+    if "暴風雨" in text or "暴風雪" in text: return "⛄"
+    
+    found_kanji = []
+    if "晴" in text: found_kanji.append("晴")
+    if "曇" in text: found_kanji.append("曇")
+    if "雨" in text and max_prob >= 30: found_kanji.append("雨")
+    if "雪" in text: found_kanji.append("雪")
+    
+    found_kanji.sort(key=lambda k: text.find(k))
+    
+    kanji_to_emoji = {"晴": "☀", "曇": "☁", "雨": "☔", "雪": "☃"}
+    symbols = [kanji_to_emoji[k] for k in found_kanji]
+    
+    if len(symbols) >= 2:
+        base_sym = f"{symbols[0]}→{symbols[1]}"
+    elif len(symbols) == 1:
+        base_sym = symbols[0]
+    else:
+        base_sym = "☁"
+        
+    if "雷" in text:
+        return f"{base_sym}⚡"
+    return base_sym
 
-          def code_to_symbol(code, pop_val=None):
-              if not code or str(code).strip() == "": return "☁"
-              try:
-                  c = int(code)
-                  sym = "☁"
-                  if 100 <= c < 200: sym = "☀"
-                  elif 200 <= c < 300: sym = "☁"
-                  elif 300 <= c < 400: sym = "☔"
-                  elif 400 <= c < 500: sym = "☃"
-                  
-                  if sym == "☔" and pop_val is not None and pop_val < 30:
-                      return "☁"
-                  return sym
-              except:
-                  pass
-              return "☁"
+def code_to_symbol(code, pop_val=None):
+    if not code or str(code).strip() == "": return "☁"
+    try:
+        c = int(code)
+        sym = "☁"
+        if 100 <= c < 200: sym = "☀"
+        elif 200 <= c < 300: sym = "☁"
+        elif 300 <= c < 400: sym = "☔"
+        elif 400 <= c < 500: sym = "☃"
+        
+        if sym == "☔" and pop_val is not None and pop_val < 30:
+            return "☁"
+        return sym
+    except:
+        pass
+    return "☁"
 
-          def get_clothing_advice(temp):
-              if temp is None: return " 不明？"
-              if temp >= 30: return " Ｔシャツ"
-              elif temp >= 25: return " 半袖シャツ"
-              elif temp >= 20: return " 長袖シャツ"
-              elif temp >= 15: return " ジャケット"
-              elif temp >= 10: return " コート"
-              else: return " ダウン"
+def get_clothing_advice(temp):
+    if temp is None: return " 不明？"
+    if temp >= 30: return " Ｔシャツ"
+    elif temp >= 25: return " 半袖シャツ"
+    elif temp >= 20: return " 長袖シャツ"
+    elif temp >= 15: return " ジャケット"
+    elif temp >= 10: return " コート"
+    else: return " ダウン"
 
-          try:
-              jst = timezone(timedelta(hours=9))
-              now_utc = datetime.now(timezone.utc)
-              now = now_utc.astimezone(jst)
-              current_hour = now.hour
+try:
+    jst = timezone(timedelta(hours=9))
+    now_utc = datetime.now(timezone.utc)
+    now = now_utc.astimezone(jst)
+    current_hour = now.hour
 
-              if current_hour < 7 or current_hour >= 22:
-                  print(f"現在の時刻は {now.strftime('%H:%M')} です。7時〜21時の時間外のため実行をスキップします。")
-                  exit(0)
+    if current_hour < 7 or current_hour >= 22:
+        print(f"現在の時刻は {now.strftime('%H:%M')} です。7時〜21時の時間外のため実行をスキップします。")
+        exit(0)
 
-              res = requests.get(JMA_FORECAST_URL).json()
-              if 17 <= current_hour <= 23:
-                  is_tomorrow_data = True
-                  label_head = "明日"
-              else:
-                  is_tomorrow_data = False
-                  label_head = "今日"
-              day_idx = 1 if is_tomorrow_data else 0
-              today_date_str = now.strftime("%Y-%m-%d")
-              target_date_str = (now + timedelta(days=1)).strftime("%Y-%m-%d") if is_tomorrow_data else today_date_str
+    res = requests.get(JMA_FORECAST_URL).json()
+    if 17 <= current_hour <= 23:
+        is_tomorrow_data = True
+        label_head = "明日"
+    else:
+        is_tomorrow_data = False
+        label_head = "今日"
+    day_idx = 1 if is_tomorrow_data else 0
+    today_date_str = now.strftime("%Y-%m-%d")
+    target_date_str = (now + timedelta(days=1)).strftime("%Y-%m-%d") if is_tomorrow_data else today_date_str
 
-              current_hour_str = now.strftime("%Y-%m-%d-%H")
-              cache_file = "last_run_hour.txt"
-              history_file = "weather_history.json"
-              print("--- Actionsキャッシュによる二重実行チェック中 ---")
-              if os.path.exists(cache_file):
-                  with open(cache_file, "r") as f:
-                      last_run_hour = f.read().strip()
-                  if last_run_hour == current_hour_str:
-                      print(f"判別結果: すでに【{now.strftime('%H:00')}時台】の最初の実行は完了しています。")
-                      print("送信をスキップ（パス）して正常終了します。")
-                      exit(0)
-              print(f"判別結果: 新しい時間帯【{now.strftime('%H:00')}時台】の初実行です。処理を進めます。")
+    current_hour_str = now.strftime("%Y-%m-%d-%H")
+    cache_file = "last_run_hour.txt"
+    history_file = "weather_history.json"
+    print("--- Actionsキャッシュによる二重実行チェック中 ---")
+    if os.path.exists(cache_file):
+        with open(cache_file, "r") as f:
+            last_run_hour = f.read().strip()
+        if last_run_hour == current_hour_str:
+            print(f"判別結果: すでに【{now.strftime('%H:00')}時台】の最初の実行は完了しています。")
+            print("送信をスキップ（パス）して正常終了します。")
+            exit(0)
+    print(f"判別結果: 新しい時間帯【{now.strftime('%H:00')}時台】の初実行です。処理を進めます。")
 
-              base_series = res[0]['timeSeries'][0]
-              weather_areas = base_series['areas']
-              sapporo_weather = next((a for a in weather_areas if a['area']['code'] == '016010'), weather_areas[0])
-              weather_text = sapporo_weather['weathers'][day_idx]
+    base_series = res[0]['timeSeries'][0]
+    weather_areas = base_series['areas']
+    sapporo_weather = next((a for a in weather_areas if a['area']['code'] == '016010'), weather_areas[0])
+    weather_text = sapporo_weather['weathers'][day_idx]
 
-              hourly_series = res[0]['timeSeries'][1]
-              hourly_times = hourly_series['timeDefines']
-              hourly_areas = hourly_series['areas']
-              sapporo_hourly = next((a for a in hourly_areas if a['area']['code'] == '016010'), hourly_areas[0])
-              hourly_weather_codes = sapporo_hourly.get('weatherCode', [])
-              hourly_pops = sapporo_hourly.get('pops', [])
+    hourly_series = res[0]['timeSeries'][1]
+    hourly_times = hourly_series['timeDefines']
+    hourly_areas = hourly_series['areas']
+    sapporo_hourly = next((a for a in hourly_areas if a['area']['code'] == '016010'), hourly_areas[0])
+    hourly_weather_codes = sapporo_hourly.get('weatherCode', [])
+    hourly_pops = sapporo_hourly.get('pops', [])
 
-              day_pops = []
-              for t_str, pop in zip(hourly_times, hourly_pops):
-                  dt_parsed = datetime.fromisoformat(t_str).astimezone(jst)
-                  if dt_parsed.strftime("%Y-%m-%d") == target_date_str and str(pop).strip() != "":
-                      day_pops.append(int(pop))
-              max_prob = max(day_pops) if day_pops else 0
-              prob_str = f"{max_prob}%"
-              umbrella_mark = "☔" if max_prob >= 50 else ("☂" if max_prob >= 30 else "")
+    day_pops = []
+    for t_str, pop in zip(hourly_times, hourly_pops):
+        dt_parsed = datetime.fromisoformat(t_str).astimezone(jst)
+        if dt_parsed.strftime("%Y-%m-%d") == target_date_str and str(pop).strip() != "":
+            day_pops.append(int(pop))
+    max_prob = max(day_pops) if day_pops else 0
+    prob_str = f"{max_prob}%"
+    umbrella_mark = "☔" if max_prob >= 50 else ("☂" if max_prob >= 30 else "")
 
-              day_symbol = get_advanced_weather_symbol(weather_text, max_prob)
-              title_text = f"{label_head}札幌市中央区{day_symbol}"
+    day_symbol = get_advanced_weather_symbol(weather_text, max_prob)
+    title_text = f"{label_head}札幌市中央区{day_symbol}"
 
-              temp_series = res[0]['timeSeries'][2]
-              temp_areas = temp_series['areas']
-              sapporo_temp = next((a for a in temp_areas if a['area']['code'] == '016010'), temp_areas[0])
-              temps = sapporo_temp['temps']
-              tmin_raw = temps[2] if is_tomorrow_data and len(temps) >= 4 else (temps[0] if len(temps) > 0 else "14")
-              tmax_raw = temps[3] if is_tomorrow_data and len(temps) >= 4 else (temps[1] if len(temps) > 1 else "25")
+    temp_series = res[0]['timeSeries'][2]
+    temp_areas = temp_series['areas']
+    sapporo_temp = next((a for a in temp_areas if a['area']['code'] == '016010'), temp_areas[0])
+    temps = sapporo_temp['temps']
+    tmin_raw = temps[2] if is_tomorrow_data and len(temps) >= 4 else (temps[0] if len(temps) > 0 else "14")
+    tmax_raw = temps[3] if is_tomorrow_data and len(temps) >= 4 else (temps[1] if len(temps) > 1 else "25")
 
-              if not is_tomorrow_data and (not tmin_raw or str(tmin_raw).strip() == "" or tmin_raw == tmax_raw):
-                  try: 
-                      tmin_raw = res[1]['timeSeries'][1]['areas'][0]['tempsMin'][0]
-                  except: 
-                      tmin_raw = "14"
-              if not tmax_raw or str(tmax_raw).strip() == "": tmax_raw = "25"
+    if not is_tomorrow_data and (not tmin_raw or str(tmin_raw).strip() == "" or tmin_raw == tmax_raw):
+        try: 
+            tmin_raw = res[1]['timeSeries'][1]['areas'][0]['tempsMin'][0]
+        except: 
+            tmin_raw = "14"
+    if not tmax_raw or str(tmax_raw).strip() == "": tmax_raw = "25"
 
-              tmin_cleaned = str(tmin_raw).strip()
-              tmax_cleaned = str(tmax_raw).strip()
-              t_min_num = int(tmin_cleaned) if tmin_cleaned and tmin_cleaned.isdigit() else 14
-              t_max_num = int(tmax_cleaned) if tmax_cleaned and tmax_cleaned.isdigit() else 25
+    tmin_cleaned = str(tmin_raw).strip()
+    tmax_cleaned = str(tmax_raw).strip()
+    t_min_num = int(tmin_cleaned) if tmin_cleaned and tmin_cleaned.isdigit() else 14
+    t_max_num = int(tmax_cleaned) if tmax_cleaned and tmax_cleaned.isdigit() else 25
 
-              diff_str = "(?)"
-              history_data = {}
-              if os.path.exists(history_file):
-                  try:
-                      with open(history_file, "r") as f:
-                          history_data = json.load(f)
-                  except:
-                      pass
+    diff_str = "(?)"
+    history_data = {}
+    if os.path.exists(history_file):
+        try:
+            with open(history_file, "r") as f:
+                history_data = json.load(f)
+        except:
+            pass
 
-              if is_tomorrow_data:
-                  if today_date_str in history_data:
-                      today_max = history_data[today_date_str]
-                      diff = t_max_num - today_max
-                      diff_str = f"(+{diff})" if diff > 0 else (f"({diff})" if diff < 0 else "(±0)")
-                  else:
-                      try:
-                          if len(temps) >= 4 and str(temps[1]).isdigit() and int(temps[1]) != t_max_num:
-                              diff = t_max_num - int(temps[1])
-                              diff_str = f"(+{diff})" if diff > 0 else (f"({diff})" if diff < 0 else "(±0)")
-                      except:
-                          pass
-              else:
-                  yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
-                  if yesterday_str in history_data:
-                      yesterday_max = history_data[yesterday_str]
-                      diff = t_max_num - yesterday_max
-                      diff_str = f"(+{diff})" if diff > 0 else (f"({diff})" if diff < 0 else "(±0)")
+    if is_tomorrow_data:
+        if today_date_str in history_data:
+            today_max = history_data[today_date_str]
+            diff = t_max_num - today_max
+            diff_str = f"(+{diff})" if diff > 0 else (f"({diff})" if diff < 0 else "(±0)")
+        else:
+            try:
+                if len(temps) >= 4 and str(temps[1]).isdigit() and int(temps[1]) != t_max_num:
+                    diff = t_max_num - int(temps[1])
+                    diff_str = f"(+{diff})" if diff > 0 else (f"({diff})" if diff < 0 else "(±0)")
+            except:
+                pass
+    else:
+        yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+        if yesterday_str in history_data:
+            yesterday_max = history_data[yesterday_str]
+            diff = t_max_num - yesterday_max
+            diff_str = f"(+{diff})" if diff > 0 else (f"({diff})" if diff < 0 else "(±0)")
 
-              history_data[target_date_str] = t_max_num
-              if is_tomorrow_data and today_date_str not in history_data:
-                  if len(temps) >= 4: history_data[today_date_str] = int(temps[1])
+    history_data[target_date_str] = t_max_num
+    if is_tomorrow_data and today_date_str not in history_data:
+        if len(temps) >= 4: history_data[today_date_str] = int(temps[1])
 
-              clean_history = {k: v for k, v in history_data.items() if (now - datetime.strptime(k, "%Y-%m-%d").replace(tzinfo=jst)).days <= 3}
-              with open(history_file, "w") as f:
-                  json.dump(clean_history, f)
+    clean_history = {k: v for k, v in history_data.items() if (now - datetime.strptime(k, "%Y-%m-%d").replace(tzinfo=jst)).days <= 3}
+    with open(history_file, "w") as f:
+        json.dump(clean_history, f)
 
-              def find_hourly_data(target_hour_str):
-                  if hourly_weather_codes and hourly_pops:
-                      for t_str, code, pop in zip(hourly_times, hourly_weather_codes, hourly_pops):
-                          dt_parsed = datetime.fromisoformat(t_str).astimezone(jst)
-                          if dt_parsed.strftime("%Y-%m-%d") == target_date_str and dt_parsed.strftime("%H") == target_hour_str:
-                              clean_code = str(code).strip()
-                              clean_pop = str(pop).strip()
-                              pop_val = int(clean_pop) if (clean_pop and clean_pop.isdigit()) else 0
-                              sym = code_to_symbol(clean_code, pop_val)
-                              return sym, pop_val
-                  return day_symbol, max_prob
+    def find_hourly_data(target_hour_str):
+        if hourly_weather_codes and hourly_pops:
+            for t_str, code, pop in zip(hourly_times, hourly_weather_codes, hourly_pops):
+                dt_parsed = datetime.fromisoformat(t_str).astimezone(jst)
+                if dt_parsed.strftime("%Y-%m-%d") == target_date_str and dt_parsed.strftime("%H") == target_hour_str:
+                    clean_code = str(code).strip()
+                    clean_pop = str(pop).strip()
+                    pop_val = int(clean_pop) if (clean_pop and clean_pop.isdigit()) else 0
+                    sym = code_to_symbol(clean_code, pop_val)
+                    return sym, pop_val
+        return day_symbol, max_prob
 
-              forecast_lines = [f"低:{t_min_num}°C 高:{t_max_num}°C{diff_str} 傘:{prob_str}{umbrella_mark}"]
-              hourly_slots = [
-                  ("06", "06:00"),
-                  ("09", "09:00"),
-                  ("12", "12:00"),
-                  ("15", "15:00"),
-                  ("18", "18:00"),
-                  ("21", "21:00")
-              ]
-              valid_rows_count = 0
-              for hour_val, label in hourly_slots:
-                  if valid_rows_count >= 4:
-                      break
-                  base_dt = now + timedelta(days=1) if is_tomorrow_data else now
-                  target_dt = base_dt.replace(hour=int(hour_val), minute=0, second=0, microsecond=0)
-                  if now > target_dt + timedelta(hours=2):
-                      continue
-                  sym, pop = find_hourly_data(hour_val)
-                  if hour_val == "06": temp = t_min_num + 1
-                  elif hour_val == "09": temp = t_min_num + 4
-                  elif hour_val == "12": temp = t_max_num - 2
-                  elif hour_val == "15": temp = t_max_num - 1
-                  elif hour_val == "18": temp = t_max_num - 4
-                  else: temp = t_min_num + 2
-                  forecast_lines.append(f"{label} {sym} {temp}°C{get_clothing_advice(temp)}")
-                  valid_rows_count += 1
-              weather_message = "\n".join(forecast_lines)
-              print("--- 送信データ内容ログ ---")
-              print(f"JST Time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
-              print(f"Title : {title_text}")
-              print(f"Message:\n{weather_message}")
-              print("---------------------------------------------------------")
+    forecast_lines = [f"低:{t_min_num}°C 高:{t_max_num}°C{diff_str} 傘:{prob_str}{umbrella_mark}"]
+    hourly_slots = [
+        ("06", "06:00"),
+        ("09", "09:00"),
+        ("12", "12:00"),
+        ("15", "15:00"),
+        ("18", "18:00"),
+        ("21", "21:00")
+    ]
+    valid_rows_count = 0
+    for hour_val, label in hourly_slots:
+        if valid_rows_count >= 4:
+            break
+        base_dt = now + timedelta(days=1) if is_tomorrow_data else now
+        target_dt = base_dt.replace(hour=int(hour_val), minute=0, second=0, microsecond=0)
+        if now > target_dt + timedelta(hours=2):
+            continue
+        sym, pop = find_hourly_data(hour_val)
+        if hour_val == "06": temp = t_min_num + 1
+        elif hour_val == "09": temp = t_min_num + 4
+        elif hour_val == "12": temp = t_max_num - 2
+        elif hour_val == "15": temp = t_max_num - 1
+        elif hour_val == "18": temp = t_max_num - 4
+        else: temp = t_min_num + 2
+        forecast_lines.append(f"{label} {sym} {temp}°C{get_clothing_advice(temp)}")
+        valid_rows_count += 1
+    weather_message = "\n".join(forecast_lines)
+    print("--- 送信データ内容ログ ---")
+    print(f"JST Time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Title : {title_text}")
+    print(f"Message:\n{weather_message}")
+    print("---------------------------------------------------------")
 
-              headers = {
-                  "Authorization": f"Bearer {API_KEY}",
-                  "Content-Type": "application/json"
-              }
-              payload = {
-                  "refreshNow": True,
-                  "title": title_text,
-                  "message": weather_message,
-                  "styles": {
-                      "title": {
-                          "fontFamily": "ChillRoundGothic",
-                          "fontSize": 24
-                      },
-                      "message": {
-                          "fontFamily": "ChillRoundGothic"
-                      }
-                  }
-              }
-              
-              try:
-                  response = requests.post(DOT_API_URL, headers=headers, json=payload, timeout=15)
-                  if response.status_code in [200, 201]:
-                      print(f"成功: {response.json().get('message')}")
-                      with open(cache_file, "w") as f:
-                          f.write(current_hour_str)
-                  else:
-                      print(f"APIエラー発生 (ステータスコード: {response.status_code})")
-                      print("一時的なサーバーエラーの可能性があるため、エラーにせず次回の定期実行に期待します。")
-                      exit(0)
-              except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
-                  print(f"ネットワークエラーを検知: {e}")
-                  print("通信環境またはAPIサーバーの一時的な不調と判断し、次回の定期実行に期待します。")
-                  exit(0)
+    headers = {
+        "Authorization": f"Bearer {API_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "refreshNow": True,
+        "title": title_text,
+        "message": weather_message,
+        "styles": {
+            "title": {
+                "fontFamily": "ChillRoundGothic",
+                "fontSize": 24
+            },
+            "message": {
+                "fontFamily": "ChillRoundGothic"
+            }
+        }
+    }
+    
+    try:
+        response = requests.post(DOT_API_URL, headers=headers, json=payload, timeout=15)
+        if response.status_code in [200, 201]:
+            print(f"成功: {response.json().get('message')}")
+            with open(cache_file, "w") as f:
+                f.write(current_hour_str)
+        else:
+            print(f"APIエラー発生 (ステータスコード: {response.status_code})")
+            print("一時的なサーバーエラーの可能性があるため、エラーにせず次回の定期実行に期待します。")
+            exit(0)
+    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+        print(f"ネットワークエラーを検知: {e}")
+        print("通信環境またはAPIサーバーの一時的な不調と判断し、次回の定期実行に期待します。")
+        exit(0)
 
-          except Exception as e:
-              print(f"スクリプト実行エラー: {e}")
-              exit(0)
-          EOF
+except Exception as e:
+    print(f"スクリプト実行エラー: {e}")
+    exit(0)
+EOF
 
       # 3. 作成した Python スクリプトを実行する
       - name: Run Weather Script
@@ -317,7 +317,7 @@ jobs:
           QUOTE0_DEVICE_ID: ${{ secrets.QUOTE0_DEVICE_ID }}
         run: python weather_script.py
 
-      # 4. 実行完了、またはスキップされた状態のファイルを次の実行のためにキャッシュ保存
+      # 4. キャッシュを保存
       - name: Save Run Hour and Temp Cache
         uses: actions/cache/save@v4
         if: success()
@@ -326,190 +326,3 @@ jobs:
             last_run_hour.txt
             weather_history.json
           key: weather-v2-cache-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests
-
-      # 2. メイン処理の実行（GitHub Actionsの仕様に合わせ、% を %% にエスケープ）
-      - name: Generate and Push to Dot API
-        env:
-          QUOTE0_API_KEY: ${{ secrets.QUOTE0_API_KEY }}
-          QUOTE0_DEVICE_ID: ${{ secrets.QUOTE0_DEVICE_ID }}
-        run: |
-          python - << 'EOF'
-          import os
-          import json
-          import time
-          import requests
-          from datetime import datetime, timedelta, timezone
-
-          API_KEY = os.environ.get("QUOTE0_API_KEY")
-          DEVICE_ID = os.environ.get("QUOTE0_DEVICE_ID")
-
-          JMA_FORECAST_URL = "https://www.jma.go.jp/bosai/forecast/data/forecast/016000.json"
-          DOT_API_URL = f"https://dot.mindreset.tech/api/authV2/open/device/{DEVICE_ID}/text"
-
-          def get_advanced_weather_symbol(text, max_prob):
-              if not text: return "☁"
-              if "暴風雨" in text or "暴風雪" in text: return "⛄"
-              
-              # 1. 漢字のテキストをもとに、登場する順番をチェックする
-              found_kanji = []
-              if "晴" in text: found_kanji.append("晴")
-              if "曇" in text: found_kanji.append("曇")
-              # 降水確率が30%未満の場合は、テキストに「雨」があってもマークから除外する
-              if "雨" in text and max_prob >= 30: found_kanji.append("雨")
-              if "雪" in text: found_kanji.append("雪")
-              
-              # 実際の文章に登場するインデックスの順に正しく並び替える
-              found_kanji.sort(key=lambda k: text.find(k))
-              
-              # 2. 漢字を絵文字にマッピング
-              kanji_to_emoji = {"晴": "☀", "曇": "☁", "雨": "☔", "雪": "☃"}
-              symbols = [kanji_to_emoji[k] for k in found_kanji]
-              
-              if len(symbols) >= 2:
-                  base_sym = f"{symbols[0]}→{symbols[1]}"
-              elif len(symbols) == 1:
-                  base_sym = symbols[0]
-              else:
-                  # 雨が除外されて空になった場合や、どれにも該当しない場合は「曇」
-                  base_sym = "☁"
-                  
-              # 「雷」が含まれる場合は、ベース記号の末尾に⚡を付与する（例: ☁→☔⚡）
-              if "雷" in text:
-                  return f"{base_sym}⚡"
-              return base_sym
-
-          def code_to_symbol(code, pop_val=None):
-              if not code or str(code).strip() == "": return "☁"
-              try:
-                  c = int(code)
-                  sym = "☁"
-                  if 100 <= c < 200: sym = "☀"
-                  elif 200 <= c < 300: sym = "☁"
-                  elif 300 <= c < 400: sym = "☔"
-                  elif 400 <= c < 500: sym = "☃"
-                  
-                  # 時系列のコード自体が「雨」でも、降水確率が30%未満なら曇りに補正する
-                  if sym == "☔" and pop_val is not None and pop_val < 30:
-                      return "☁"
-                  return sym
-              except:
-                  pass
-              return "☁"
-
-          def get_clothing_advice(temp):
-              if temp is None: return " 不明？"
-              if temp >= 30: return " Ｔシャツ"
-              elif temp >= 25: return " 半袖シャツ"
-              elif temp >= 20: return " 長袖シャツ"
-              elif temp >= 15: return " ジャケット"
-              elif temp >= 10: return " コート"
-              else: return " ダウン"
-
-          try:
-              jst = timezone(timedelta(hours=9))
-              now_utc = datetime.now(timezone.utc)
-              now = now_utc.astimezone(jst)
-              current_hour = now.hour
-
-              # 7時から21時まで（7:00 〜 21:59）の間のみ実行。それ以外はスキップ。
-              if current_hour < 7 or current_hour >= 22:
-                  print(f"現在の時刻は {now.strftime('%%H:%%M')} です。7時〜21時の時間外のため実行をスキップします。")
-                  exit(0)
-
-              res = requests.get(JMA_FORECAST_URL).json()
-              if 17 <= current_hour <= 23:
-                  is_tomorrow_data = True
-                  label_head = "明日"
-              else:
-                  is_tomorrow_data = False
-                  label_head = "今日"
-              day_idx = 1 if is_tomorrow_data else 0
-              today_date_str = now.strftime("%%Y-%%m-%%d")
-              target_date_str = (now + timedelta(days=1)).strftime("%%Y-%%m-%%d") if is_tomorrow_data else today_date_str
-
-              # --- GitHubのキャッシュファイルを用いた二重実行チェック ---
-              current_hour_str = now.strftime("%%Y-%%m-%%d-%%H")
-              cache_file = "last_run_hour.txt"
-              history_file = "weather_history.json"
-              print("--- Actionsキャッシュによる二重実行チェック中 ---")
-              if os.path.exists(cache_file):
-                  with open(cache_file, "r") as f:
-                      last_run_hour = f.read().strip()
-                  if last_run_hour == current_hour_str:
-                      print(f"判別結果: すでに【{now.strftime('%%H:00')}時台】の最初の実行は完了しています。")
-                      print("送信をスキップ（パス）して正常終了します。")
-                      exit(0)
-              print(f"判別結果: 新しい時間帯【{now.strftime('%%H:00')}時台】の初実行です。処理を進めます。")
-
-              # --- 1. 1日単位の基本天気予報 (timeSeries[0]) ---
-              base_series = res[0]['timeSeries'][0]
-              weather_areas = base_series['areas']
-              sapporo_weather = next((a for a in weather_areas if a['area']['code'] == '016010'), weather_areas[0])
-              weather_text = sapporo_weather['weathers'][day_idx]
-
-              # --- 2. 3時間ごとの時系列予報 (timeSeries[1]) ---
-              hourly_series = res[0]['timeSeries'][1]
-              hourly_times = hourly_series['timeDefines']
-              hourly_areas = hourly_series['areas']
-              sapporo_hourly = next((a for a in hourly_areas if a['area']['code'] == '016010'), hourly_areas[0])
-              hourly_weather_codes = sapporo_hourly.get('weatherCode', [])
-              hourly_pops = sapporo_hourly.get('pops', [])
-
-              # --- 3. 降水確率の計算 ---
-              day_pops = []
-              for t_str, pop in zip(hourly_times, hourly_pops):
-                  dt_parsed = datetime.fromisoformat(t_str).astimezone(jst)
-                  if dt_parsed.strftime("%%Y-%%m-%%d") == target_date_str and str(pop).strip() != "":
-                      day_pops.append(int(pop))
-              max_prob = max(day_pops) if day_pops else 0
-              prob_str = f"{max_prob}%"
-              umbrella_mark = "☔" if max_prob >= 50 else ("☂" if max_prob >= 30 else "")
-
-              # 降水確率が確定した後にメインシンボルを決定（ここで確率を反映）
-              day_symbol = get_advanced_weather_symbol(weather_text, max_prob)
-              title_text = f"{label_head}札幌市中央区{day_symbol}"
-
-              # --- 4. 最高・最低気温の取得 (timeSeries[2]) ---
-              temp_series = res[0]['timeSeries'][2]
-              temp_areas = temp_series['areas']
-              sapporo_temp = next((a for a in temp_areas if a['area']['code'] == '016010'), temp_areas[0])
-              temps = sapporo_temp['temps']
-              tmin_raw = temps[2] if is_tomorrow_data and len(temps) >= 4 else (temps[0] if len(temps) > 0 else "14")
-              tmax_raw = temps[3] if is_tomorrow_data and len(temps) >= 4 else (temps[1] if len(temps) > 1 else "25")
-
-              if not is_tomorrow_data and (not tmin_raw or str(tmin_raw).strip() == "" or tmin_raw == tmax_raw):
-                  try: 
-                      tmin_raw = res[1]['timeSeries'][1]['areas'][0]['tempsMin'][0]
-                  except: 
-                      tmin_raw = "14"
-              if not tmax_raw or str(tmax_raw).strip() == "": tmax_raw = "25"
-
-              tmin_cleaned = str(tmin_raw).strip()
-              tmax_cleaned = str(tmax_raw).strip()
-              t_min_num = int(tmin_cleaned) if tmin_cleaned and tmin_cleaned.isdigit() else 14
-              t_max_num = int(tmax_cleaned) if tmax_cleaned and tmax_cleaned.isdigit() else 25
-
-              # --- 5. キャッシュを使った厳密な前日比計算 ---
-              diff_str = "(?)"
-              history_data = {}
-              if os.path.exists(history_file):
-                  try:
-                      with open(history_file, "r") as f:
-                          history_data = json.load(f)
-                  except:
-                      pass
-
-              if is_tomorrow_data:
-                  if today_date_str in history_data:
-                      today_max = history_data[today_date_str]
-                      diff = t_max
