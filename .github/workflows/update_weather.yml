@@ -188,7 +188,8 @@ jobs:
                 hourly_pops = sapporo_hourly.get('pops', [])
 
                 day_pops = []
-                for t_str, pop in zip(hourly_times, hourly_pops):
+                # pop専用の時間定義がないため、元のコードの組み合わせロジックを流用（安全に最大値のみ算出）
+                for t_str, pop in zip(hourly_times[:len(hourly_pops)], hourly_pops):
                     dt_parsed = datetime.fromisoformat(t_str).astimezone(jst)
                     if dt_parsed.strftime("%Y-%m-%d") == target_date_str and str(pop).strip() != "":
                         day_pops.append(int(pop))
@@ -254,19 +255,18 @@ jobs:
                 with open(history_file, "w") as f:
                     json.dump(clean_history, f)
 
-                # 時系列データ判定
+                # 【修正箇所】時系列データ判定
                 def find_hourly_data(target_hour_str):
-                    if hourly_weather_codes and hourly_pops:
-                        for t_str, code, pop in zip(hourly_times, hourly_weather_codes, hourly_pops):
+                    if hourly_weather_codes:
+                        # weatherCodeの配列長に合わせてzipを取る（短いpopsと混ぜない）
+                        for t_str, code in zip(hourly_times, hourly_weather_codes):
                             dt_parsed = datetime.fromisoformat(t_str).astimezone(jst)
                             if dt_parsed.strftime("%Y-%m-%d") == target_date_str and dt_parsed.strftime("%H") == target_hour_str:
                                 clean_code = str(code).strip()
-                                clean_pop = str(pop).strip()
-                                pop_val = int(clean_pop) if (clean_pop and clean_pop.isdigit()) else 0
-                                
-                                sym = code_to_symbol(clean_code, pop_val)
-                                return sym, pop_val
-                    # 雷を除去した安全な出現位置パースシンボルを割り当てる
+                                # 降水確率は一律で全体のmax_probを渡して安全側に倒す
+                                sym = code_to_symbol(clean_code, max_prob)
+                                return sym, max_prob
+                    # 該当データがない、またはパース漏れ時のみフォールバック
                     fallback_sym = get_advanced_weather_symbol(weather_text, max_prob).replace("／⚡", "").replace("⚡", "")
                     return fallback_sym, max_prob
 
