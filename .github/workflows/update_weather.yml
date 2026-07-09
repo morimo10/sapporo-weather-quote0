@@ -45,7 +45,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      # 2. メイン処理の実行（出現位置インデックスによる完璧な並び替えロジック）
+      # 2. メイン処理の実行
       - name: Generate and Push to Dot API
         env:
           QUOTE0_API_KEY: ${{ secrets.QUOTE0_API_KEY }}
@@ -67,28 +67,23 @@ jobs:
                 if not text: return "☁"
                 if "暴風雨" in text or "暴風雪" in text: return "⛄"
                 
-                # 【ロジック修正】含まれる漢字を検出し、文章の中での「出現順」で並び替える
                 kanji_to_emoji = {"晴": "☀", "曇": "☁", "雨": "☔", "雪": "☃"}
                 found_elements = []
                 
                 for k, emoji in kanji_to_emoji.items():
                     idx = text.find(k)
                     if idx != -1:
-                        # 降水確率が30%未満の場合は、雨マークを曇りに安全補正
                         actual_emoji = "☁" if (k == "雨" and max_prob < 30) else emoji
                         found_elements.append((idx, actual_emoji))
                 
-                # 出現位置（idx）が若い順（文章の左側にある順）にソート
                 found_elements.sort(key=lambda x: x[0])
                 symbols = [item[1] for item in found_elements]
                 
-                # 重複する絵文字（例：曇のち曇など）は連続しないように間引く
                 unique_symbols = []
                 for s in symbols:
                     if not unique_symbols or unique_symbols[-1] != s:
                         unique_symbols.append(s)
                 
-                # 繋ぎ文字の判定（「後」や「のち」があれば「→」、それ以外は「／」）
                 join_char = "→" if ("後" in text or "のち" in text) else "／"
                 
                 if len(unique_symbols) >= 2:
@@ -98,7 +93,6 @@ jobs:
                 else:
                     base_sym = "☁"
                     
-                # タイトル用の雷マーク判定
                 if "雷" in text and max_prob >= 30:
                     return f"{base_sym}／⚡"
                 return base_sym
@@ -188,7 +182,6 @@ jobs:
                 hourly_pops = sapporo_hourly.get('pops', [])
 
                 day_pops = []
-                # pop専用の時間定義がないため、元のコードの組み合わせロジックを流用（安全に最大値のみ算出）
                 for t_str, pop in zip(hourly_times[:len(hourly_pops)], hourly_pops):
                     dt_parsed = datetime.fromisoformat(t_str).astimezone(jst)
                     if dt_parsed.strftime("%Y-%m-%d") == target_date_str and str(pop).strip() != "":
@@ -255,18 +248,28 @@ jobs:
                 with open(history_file, "w") as f:
                     json.dump(clean_history, f)
 
-                # 【修正箇所】時系列データ判定
+                # 【修正箇所】最も近い時間の予報データを探索するロジックに変更
                 def find_hourly_data(target_hour_str):
-                    if hourly_weather_codes:
-                        # weatherCodeの配列長に合わせてzipを取る（短いpopsと混ぜない）
+                    if hourly_weather_codes and hourly_times:
+                        best_code = None
+                        min_diff = timedelta(hours=24)
+                        
+                        base_dt = now + timedelta(days=1) if is_tomorrow_data else now
+                        target_dt = base_dt.replace(hour=int(target_hour_str), minute=0, second=0, microsecond=0)
+                        
                         for t_str, code in zip(hourly_times, hourly_weather_codes):
                             dt_parsed = datetime.fromisoformat(t_str).astimezone(jst)
-                            if dt_parsed.strftime("%Y-%m-%d") == target_date_str and dt_parsed.strftime("%H") == target_hour_str:
-                                clean_code = str(code).strip()
-                                # 降水確率は一律で全体のmax_probを渡して安全側に倒す
-                                sym = code_to_symbol(clean_code, max_prob)
-                                return sym, max_prob
-                    # 該当データがない、またはパース漏れ時のみフォールバック
+                            diff = abs(dt_parsed - target_dt)
+                            
+                            # 3時間以内のズレであれば許容し、一番近いデータを保持
+                            if diff < min_diff and diff <= timedelta(hours=3):
+                                min_diff = diff
+                                best_code = str(code).strip()
+                                
+                        if best_code:
+                            sym = code_to_symbol(best_code, max_prob)
+                            return sym, max_prob
+                            
                     fallback_sym = get_advanced_weather_symbol(weather_text, max_prob).replace("／⚡", "").replace("⚡", "")
                     return fallback_sym, max_prob
 
