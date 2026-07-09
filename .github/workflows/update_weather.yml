@@ -97,15 +97,11 @@ jobs:
                     return f"{base_sym}／⚡"
                 return base_sym
 
-            # 【大幅修正】気象庁の時系列3桁天気コードに完全対応
             def code_to_symbol(code, pop_val=None):
                 if not code or str(code).strip() == "": return "☁"
                 try:
                     c = int(code)
-                    
-                    # 百の位：主たる天気 (1:晴, 2:曇, 3:雨, 4:雪)
                     primary = c // 100
-                    # 下2桁から、繋ぎ文字と2番目の天気をパース
                     sub_code = c % 100
                     
                     num_to_emoji = {1: "☀", 2: "☁", 3: "☔", 4: "☃"}
@@ -113,24 +109,23 @@ jobs:
                     sym2 = ""
                     join_char = "／"
                     
-                    if sub_code == 0:   # 変化なし
+                    if sub_code == 0:
                         sym2 = ""
-                    elif sub_code == 1: # のち晴
+                    elif sub_code == 1:
                         join_char = "→"; sym2 = "☀"
-                    elif sub_code in [2, 12, 22, 32, 42]: # 時々曇、一時曇など
+                    elif sub_code in [2, 12, 22, 32, 42]:
                         join_char = "／"; sym2 = "☁"
-                    elif sub_code in [3, 13, 23, 33, 43]: # 時々雨、一時雨など
+                    elif sub_code in [3, 13, 23, 33, 43]:
                         join_char = "／"; sym2 = "☔"
-                    elif sub_code in [5, 15, 25, 35, 45]: # 時々晴、一時晴など
+                    elif sub_code in [5, 15, 25, 35, 45]:
                         join_char = "／"; sym2 = "☀"
-                    elif sub_code == 11: # のち曇
+                    elif sub_code == 11:
                         join_char = "→"; sym2 = "☁"
-                    elif sub_code == 21: # のち雨
+                    elif sub_code == 21:
                         join_char = "→"; sym2 = "☔"
-                    elif sub_code == 31: # のち雪
+                    elif sub_code == 31:
                         join_char = "→"; sym2 = "☃"
                         
-                    # 降水確率による安全補正
                     if pop_val is not None and pop_val < 30:
                         if sym1 == "☔": sym1 = "☁"
                         if sym2 == "☔": sym2 = "☁"
@@ -194,15 +189,23 @@ jobs:
                 sapporo_weather = next((a for a in weather_areas if a['area']['code'] == '016010'), weather_areas[0])
                 weather_text = sapporo_weather['weathers'][day_idx]
 
+                # 時系列データ階層の取得
                 hourly_series = res[0]['timeSeries'][1]
-                hourly_times = hourly_series['timeDefines']
+                # 【重要】天気コードと降水確率は時間定義が完全に独立しているため、共通定義参照を廃止
+                hourly_times_root = hourly_series['timeDefines'] 
                 hourly_areas = hourly_series['areas']
                 sapporo_hourly = next((a for a in hourly_areas if a['area']['code'] == '016010'), hourly_areas[0])
+                
                 hourly_weather_codes = sapporo_hourly.get('weatherCode', [])
                 hourly_pops = sapporo_hourly.get('pops', [])
 
+                # 天気コード用と降水確率用の時間を個別に正しくマッピング
+                # 通常、配列の後ろから数えて一致させると安全
+                weather_times = hourly_times_root[-len(hourly_weather_codes):] if hourly_weather_codes else []
+                pop_times = hourly_times_root[-len(hourly_pops):] if hourly_pops else []
+
                 day_pops = []
-                for t_str, pop in zip(hourly_times[:len(hourly_pops)], hourly_pops):
+                for t_str, pop in zip(pop_times, hourly_pops):
                     dt_parsed = datetime.fromisoformat(t_str).astimezone(jst)
                     if dt_parsed.strftime("%Y-%m-%d") == target_date_str and str(pop).strip() != "":
                         day_pops.append(int(pop))
@@ -268,16 +271,16 @@ jobs:
                 with open(history_file, "w") as f:
                     json.dump(clean_history, f)
 
-                # 最も近い時間の予報データを探索するロジック
+                # 最も近い時間の予報データを探索するロジック（修正された時間定義を使用）
                 def find_hourly_data(target_hour_str):
-                    if hourly_weather_codes and hourly_times:
+                    if hourly_weather_codes and weather_times:
                         best_code = None
                         min_diff = timedelta(hours=24)
                         
                         base_dt = now + timedelta(days=1) if is_tomorrow_data else now
                         target_dt = base_dt.replace(hour=int(target_hour_str), minute=0, second=0, microsecond=0)
                         
-                        for t_str, code in zip(hourly_times, hourly_weather_codes):
+                        for t_str, code in zip(weather_times, hourly_weather_codes):
                             dt_parsed = datetime.fromisoformat(t_str).astimezone(jst)
                             diff = abs(dt_parsed - target_dt)
                             
