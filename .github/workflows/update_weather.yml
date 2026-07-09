@@ -97,24 +97,44 @@ jobs:
                     return f"{base_sym}／⚡"
                 return base_sym
 
+            # 【大幅修正】気象庁の時系列3桁天気コードに完全対応
             def code_to_symbol(code, pop_val=None):
                 if not code or str(code).strip() == "": return "☁"
                 try:
                     c = int(code)
+                    
+                    # 百の位：主たる天気 (1:晴, 2:曇, 3:雨, 4:雪)
                     primary = c // 100
-                    join_type = (c % 100) // 10
-                    join_char = "→" if join_type == 1 else "／"
+                    # 下2桁から、繋ぎ文字と2番目の天気をパース
+                    sub_code = c % 100
                     
                     num_to_emoji = {1: "☀", 2: "☁", 3: "☔", 4: "☃"}
                     sym1 = num_to_emoji.get(primary, "☁")
+                    sym2 = ""
+                    join_char = "／"
                     
-                    sub_idx = c % 10
-                    sym2 = num_to_emoji.get(sub_idx, "")
-                    
+                    if sub_code == 0:   # 変化なし
+                        sym2 = ""
+                    elif sub_code == 1: # のち晴
+                        join_char = "→"; sym2 = "☀"
+                    elif sub_code in [2, 12, 22, 32, 42]: # 時々曇、一時曇など
+                        join_char = "／"; sym2 = "☁"
+                    elif sub_code in [3, 13, 23, 33, 43]: # 時々雨、一時雨など
+                        join_char = "／"; sym2 = "☔"
+                    elif sub_code in [5, 15, 25, 35, 45]: # 時々晴、一時晴など
+                        join_char = "／"; sym2 = "☀"
+                    elif sub_code == 11: # のち曇
+                        join_char = "→"; sym2 = "☁"
+                    elif sub_code == 21: # のち雨
+                        join_char = "→"; sym2 = "☔"
+                    elif sub_code == 31: # のち雪
+                        join_char = "→"; sym2 = "☃"
+                        
+                    # 降水確率による安全補正
                     if pop_val is not None and pop_val < 30:
                         if sym1 == "☔": sym1 = "☁"
                         if sym2 == "☔": sym2 = "☁"
-                    
+                        
                     if sym2 and sym1 != sym2:
                         return f"{sym1}{join_char}{sym2}"
                     return sym1
@@ -248,7 +268,7 @@ jobs:
                 with open(history_file, "w") as f:
                     json.dump(clean_history, f)
 
-                # 【修正箇所】最も近い時間の予報データを探索するロジックに変更
+                # 最も近い時間の予報データを探索するロジック
                 def find_hourly_data(target_hour_str):
                     if hourly_weather_codes and hourly_times:
                         best_code = None
@@ -261,7 +281,6 @@ jobs:
                             dt_parsed = datetime.fromisoformat(t_str).astimezone(jst)
                             diff = abs(dt_parsed - target_dt)
                             
-                            # 3時間以内のズレであれば許容し、一番近いデータを保持
                             if diff < min_diff and diff <= timedelta(hours=3):
                                 min_diff = diff
                                 best_code = str(code).strip()
