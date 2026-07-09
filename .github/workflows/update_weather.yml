@@ -45,7 +45,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      # 2. メイン処理の実行（フォールバック時も曇のち雨を正しく「☁→☔」に変換する修正版）
+      # 2. メイン処理の実行（文章の前後関係から天気の移り変わりを正しく切り出すロジックに刷新）
       - name: Generate and Push to Dot API
         env:
           QUOTE0_API_KEY: ${{ secrets.QUOTE0_API_KEY }}
@@ -67,27 +67,50 @@ jobs:
                 if not text: return "☁"
                 if "暴風雨" in text or "暴風雪" in text: return "⛄"
                 
-                found_kanji = []
-                if "晴" in text: found_kanji.append("晴")
-                if "曇" in text: found_kanji.append("曇")
-                if "雨" in text and max_prob >= 30: found_kanji.append("雨")
-                if "雪" in text: found_kanji.append("雪")
-                
-                found_kanji.sort(key=lambda k: text.find(k))
-                kanji_to_emoji = {"晴": "☀", "曇": "☁", "雨": "☔", "雪": "☃"}
-                symbols = [kanji_to_emoji[k] for k in found_kanji]
-                
+                # 【ロジック刷新】文章の区切りから「前半の天気」と「後半の天気」を正しく判定
                 join_char = "／"
+                first_part = text
+                second_part = ""
+                
                 if "後" in text:
                     join_char = "→"
-                
-                if len(symbols) >= 2:
-                    base_sym = f"{symbols[0]}{join_char}{symbols[1]}"
-                elif len(symbols) == 1:
-                    base_sym = symbols[0]
+                    parts = text.split("後")
+                    first_part = parts[0]
+                    second_part = parts[1] if len(parts) > 1 else ""
+                elif "時々" in text:
+                    join_char = "／"
+                    parts = text.split("時々")
+                    first_part = parts[0]
+                    second_part = parts[1] if len(parts) > 1 else ""
+                elif "のち" in text:
+                    join_char = "→"
+                    parts = text.split("のち")
+                    first_part = parts[0]
+                    second_part = parts[1] if len(parts) > 1 else ""
+
+                def check_main_weather(target_text):
+                    if "晴" in target_text: return "☀"
+                    if "曇" in target_text: return "☁"
+                    if "雨" in target_text: return "☔"
+                    if "雪" in target_text: return "☃"
+                    return ""
+
+                sym1 = check_main_weather(first_part)
+                sym2 = check_main_weather(second_part) if second_part else ""
+
+                # 降水確率が低い場合は雨マークを曇りに安全補正
+                if max_prob < 30:
+                    if sym1 == "☔": sym1 = "☁"
+                    if sym2 == "☔": sym2 = "☁"
+
+                if not sym1: sym1 = "☁"
+
+                if sym2 and sym1 != sym2:
+                    base_sym = f"{sym1}{join_char}{sym2}"
                 else:
-                    base_sym = "☁"
-                    
+                    base_sym = sym1
+
+                # タイトル用の雷マーク判定
                 if "雷" in text and max_prob >= 30:
                     return f"{base_sym}／⚡"
                 return base_sym
@@ -255,7 +278,7 @@ jobs:
                                 
                                 sym = code_to_symbol(clean_code, pop_val)
                                 return sym, pop_val
-                    # 【修正】データ不一致時のフォールバックでも「曇後雨」を正しく解釈し、雷⚡だけを除去した「☁→☔」を安全に生成
+                    # 雷を除去した安全なフルパースシンボルを割り当てる
                     fallback_sym = get_advanced_weather_symbol(weather_text, max_prob).replace("／⚡", "").replace("⚡", "")
                     return fallback_sym, max_prob
 
