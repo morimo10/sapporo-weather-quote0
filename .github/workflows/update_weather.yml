@@ -189,9 +189,7 @@ jobs:
                 sapporo_weather = next((a for a in weather_areas if a['area']['code'] == '016010'), weather_areas[0])
                 weather_text = sapporo_weather['weathers'][day_idx]
 
-                # 時系列データ階層の取得
                 hourly_series = res[0]['timeSeries'][1]
-                # 【重要】天気コードと降水確率は時間定義が完全に独立しているため、共通定義参照を廃止
                 hourly_times_root = hourly_series['timeDefines'] 
                 hourly_areas = hourly_series['areas']
                 sapporo_hourly = next((a for a in hourly_areas if a['area']['code'] == '016010'), hourly_areas[0])
@@ -199,8 +197,6 @@ jobs:
                 hourly_weather_codes = sapporo_hourly.get('weatherCode', [])
                 hourly_pops = sapporo_hourly.get('pops', [])
 
-                # 天気コード用と降水確率用の時間を個別に正しくマッピング
-                # 通常、配列の後ろから数えて一致させると安全
                 weather_times = hourly_times_root[-len(hourly_weather_codes):] if hourly_weather_codes else []
                 pop_times = hourly_times_root[-len(hourly_pops):] if hourly_pops else []
 
@@ -271,7 +267,7 @@ jobs:
                 with open(history_file, "w") as f:
                     json.dump(clean_history, f)
 
-                # 最も近い時間の予報データを探索するロジック（修正された時間定義を使用）
+                # 最も近い時間の予報データを探索するロジック
                 def find_hourly_data(target_hour_str):
                     if hourly_weather_codes and weather_times:
                         best_code = None
@@ -290,6 +286,13 @@ jobs:
                                 
                         if best_code:
                             sym = code_to_symbol(best_code, max_prob)
+                            
+                            # 【スマート補正】全体のテロップが「雨時々曇」「雨のち曇」などで、
+                            # 3時間予報が雨一色(☔)の場合、午後(12時以降)のスロットは「☁」に安全置換する
+                            hour_int = int(target_hour_str)
+                            if hour_int >= 12 and sym == "☔" and "曇" in weather_text:
+                                sym = "☁"
+                                
                             return sym, max_prob
                             
                     fallback_sym = get_advanced_weather_symbol(weather_text, max_prob).replace("／⚡", "").replace("⚡", "")
