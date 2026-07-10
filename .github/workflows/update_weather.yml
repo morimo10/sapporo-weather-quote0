@@ -24,16 +24,16 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 1. キャッシュの復元（確実を期すためv5にアップデート）
+      # 1. キャッシュの復元（v7にアップデート）
       - name: Restore Last Run Hour and Temp Cache
         uses: actions/cache/restore@v4
         with:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v5-
+          key: weather-v2-cache-v7-
           restore-keys: |
-            weather-v2-cache-v5-
+            weather-v2-cache-v7-
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -242,7 +242,7 @@ jobs:
 
                 if is_tomorrow_data:
                     if today_date_str in history_data:
-                        today_max = history_data[today_date_str]
+                        today_max = history_data[today_date_str] if isinstance(history_data[today_date_str], (int, float)) else 25
                         diff = t_max_num - today_max
                         diff_str = f"(+{diff})" if diff > 0 else (f"({diff})" if diff < 0 else "(±0)")
                     else:
@@ -255,7 +255,7 @@ jobs:
                 else:
                     yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
                     if yesterday_str in history_data:
-                        yesterday_max = history_data[yesterday_str]
+                        yesterday_max = history_data[yesterday_str] if isinstance(history_data[yesterday_str], (int, float)) else 25
                         diff = t_max_num - yesterday_max
                         diff_str = f"(+{diff})" if diff > 0 else (f"({diff})" if diff < 0 else "(±0)")
 
@@ -263,12 +263,11 @@ jobs:
                 if is_tomorrow_data and today_date_str not in history_data:
                     if len(temps) >= 4: history_data[today_date_str] = int(temps[1])
 
-                clean_history = {k: v for k, v in history_data.items() if (now - datetime.strptime(k, "%Y-%m-%d").replace(tzinfo=jst)).days <= 3}
-                with open(history_file, "w") as f:
-                    json.dump(clean_history, f)
-
+                # 時間ごとの最新の検索結果を永続ストック＆バックアップ呼び出しするロジック
                 def find_hourly_data(target_hour_str):
                     current_slot_pop = max_prob
+                    cache_key = f"sym-{target_date_str}-{target_hour_str}"
+                    pop_cache_key = f"pop-{target_date_str}-{target_hour_str}"
                     
                     if hourly_pops and pop_times:
                         min_p_diff = timedelta(hours=24)
@@ -280,6 +279,7 @@ jobs:
                             if diff < min_p_diff and diff <= timedelta(hours=3) and str(pop).strip() != "":
                                 min_p_diff = diff
                                 current_slot_pop = int(pop)
+                                history_data[pop_cache_key] = current_slot_pop  # 降水確率のキャッシュ保存/更新
 
                     if hourly_weather_codes and weather_times:
                         best_code = None
@@ -296,7 +296,14 @@ jobs:
                                 
                         if best_code:
                             sym = code_to_symbol(best_code, current_slot_pop)
+                            history_data[cache_key] = sym  # 時間帯データの最新上書き保存
                             return sym, current_slot_pop
+
+                    # もし気象庁の生データから消えていた場合は、過去に保存したキャッシュから復元する
+                    if cache_key in history_data:
+                        saved_sym = history_data[cache_key]
+                        saved_pop = history_data.get(pop_cache_key, current_slot_pop)
+                        return saved_sym, saved_pop
                             
                     fallback_sym = get_advanced_weather_symbol(weather_text, current_slot_pop).replace("／⚡", "").replace("⚡", "")
                     return fallback_sym, current_slot_pop
@@ -320,13 +327,6 @@ jobs:
                         continue
                     sym, pop = find_hourly_data(hour_val)
                     
-                    # 【最終解決：最下層での確定上書きルール】
-                    # テロップに「曇」が含まれており、且つ12時以降の枠であれば、
-                    # 上のどのロジックが何を返してこようとも一律で「☁」に強制置換する
-                    clean_weather_text = "".join(weather_text.split())
-                    if int(hour_val) >= 12 and "曇" in clean_weather_text:
-                        sym = "☁"
-                    
                     if hour_val == "06": temp = t_min_num + 1
                     elif hour_val == "09": temp = t_min_num + 4
                     elif hour_val == "12": temp = t_max_num - 2
@@ -347,6 +347,12 @@ jobs:
                     forecast_lines.append(f"{label} {padded_sym}{temp_str}°C{get_clothing_advice(temp)}")
                     valid_rows_count += 1
                 weather_message = "\n".join(forecast_lines)
+                
+                # 履歴ファイルのクリーンアップ（古いデータの間引きと保存）
+                clean_history = {k: v for k, v in history_data.items() if "sym-" in k or "pop-" in k or (k.count("-") == 2 and (now - datetime.strptime(k, "%Y-%m-%d").replace(tzinfo=jst)).days <= 3)}
+                with open(history_file, "w") as f:
+                    json.dump(clean_history, f)
+
                 print("--- 送信データ内容ログ ---")
                 print(f"JST Time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
                 print(f"Title : {title_text}")
@@ -391,7 +397,7 @@ jobs:
         run: |
           python -c "$PYTHON_SCRIPT"
 
-      # 3. キャッシュの保存（v5にアップデート）
+      # 3. キャッシュの保存（v7にアップデート）
       - name: Save Run Hour and Temp Cache
         uses: actions/cache/save@v4
         if: success()
@@ -399,4 +405,4 @@ jobs:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v5-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: weather-v2-cache-v7-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
