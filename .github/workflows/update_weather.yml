@@ -24,16 +24,16 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 1. 前回の実行時間と履歴ファイルをキャッシュから復元（キーにv3を追加してクリーンアップ）
+      # 1. キャッシュの復元（確実を期すためv4にアップデート）
       - name: Restore Last Run Hour and Temp Cache
         uses: actions/cache/restore@v4
         with:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v3-
+          key: weather-v2-cache-v4-
           restore-keys: |
-            weather-v2-cache-v3-
+            weather-v2-cache-v4-
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -267,34 +267,51 @@ jobs:
                 with open(history_file, "w") as f:
                     json.dump(clean_history, f)
 
+                # 最も近い時間の予報データを探索するロジック
                 def find_hourly_data(target_hour_str):
+                    current_slot_pop = max_prob
+                    
+                    # 1. 各時間帯のスロットに最も近いリアルな降水確率(POP)をまず探す
+                    if hourly_pops and pop_times:
+                        min_p_diff = timedelta(hours=24)
+                        base_dt = now + timedelta(days=1) if is_tomorrow_data else now
+                        target_dt = base_dt.replace(hour=int(target_hour_str), minute=0, second=0, microsecond=0)
+                        for t_str, pop in zip(pop_times, hourly_pops):
+                            dt_parsed = datetime.fromisoformat(t_str).astimezone(jst)
+                            diff = abs(dt_parsed - target_dt)
+                            if diff < min_p_diff and diff <= timedelta(hours=3) and str(pop).strip() != "":
+                                min_p_diff = diff
+                                current_slot_pop = int(pop)
+
+                    # 2. 天気アイコンの決定
                     if hourly_weather_codes and weather_times:
                         best_code = None
                         min_diff = timedelta(hours=24)
-                        
                         base_dt = now + timedelta(days=1) if is_tomorrow_data else now
                         target_dt = base_dt.replace(hour=int(target_hour_str), minute=0, second=0, microsecond=0)
                         
                         for t_str, code in zip(weather_times, hourly_weather_codes):
                             dt_parsed = datetime.fromisoformat(t_str).astimezone(jst)
                             diff = abs(dt_parsed - target_dt)
-                            
                             if diff < min_diff and diff <= timedelta(hours=3):
                                 min_diff = diff
                                 best_code = str(code).strip()
                                 
                         if best_code:
-                            sym = code_to_symbol(best_code, max_prob)
+                            sym = code_to_symbol(best_code, current_slot_pop)
                             
-                            # 【スマート午後曇り補正】
+                            # 【超強力・クレンジング付き午後曇り補正】
+                            # 気象庁の生のテキストデータに含まれる全角スペース・半角スペース・改行コードを除去
+                            clean_weather_text = "".join(weather_text.split())
                             hour_int = int(target_hour_str)
-                            if hour_int >= 12 and sym == "☔" and "曇" in weather_text:
+                            
+                            if hour_int >= 12 and sym == "☔" and "曇" in clean_weather_text:
                                 sym = "☁"
                                 
-                            return sym, max_prob
+                            return sym, current_slot_pop
                             
-                    fallback_sym = get_advanced_weather_symbol(weather_text, max_prob).replace("／⚡", "").replace("⚡", "")
-                    return fallback_sym, max_prob
+                    fallback_sym = get_advanced_weather_symbol(weather_text, current_slot_pop).replace("／⚡", "").replace("⚡", "")
+                    return fallback_sym, current_slot_pop
 
                 forecast_lines = [f"低:{t_min_num}°C 高:{t_max_num}°C{diff_str} 傘:{prob_str}{umbrella_mark}"]
                 hourly_slots = [
@@ -378,7 +395,7 @@ jobs:
         run: |
           python -c "$PYTHON_SCRIPT"
 
-      # 3. キャッシュの保存（キーにv3を追加）
+      # 3. キャッシュの保存（v4にアップデート）
       - name: Save Run Hour and Temp Cache
         uses: actions/cache/save@v4
         if: success()
@@ -386,4 +403,4 @@ jobs:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v3-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: weather-v2-cache-v4-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
