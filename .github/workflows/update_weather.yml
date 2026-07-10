@@ -24,16 +24,16 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 1. 前回の実行時間と履歴ファイルをキャッシュから復元
+      # 1. 前回の実行時間と履歴ファイルをキャッシュから復元（キーにv3を追加してクリーンアップ）
       - name: Restore Last Run Hour and Temp Cache
         uses: actions/cache/restore@v4
         with:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-
+          key: weather-v2-cache-v3-
           restore-keys: |
-            weather-v2-cache-
+            weather-v2-cache-v3-
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -267,7 +267,6 @@ jobs:
                 with open(history_file, "w") as f:
                     json.dump(clean_history, f)
 
-                # 最も近い時間の予報データを探索するロジック
                 def find_hourly_data(target_hour_str):
                     if hourly_weather_codes and weather_times:
                         best_code = None
@@ -287,8 +286,7 @@ jobs:
                         if best_code:
                             sym = code_to_symbol(best_code, max_prob)
                             
-                            # 【スマート補正】全体のテロップが「雨時々曇」「雨のち曇」などで、
-                            # 3時間予報が雨一色(☔)の場合、午後(12時以降)のスロットは「☁」に安全置換する
+                            # 【スマート午後曇り補正】
                             hour_int = int(target_hour_str)
                             if hour_int >= 12 and sym == "☔" and "曇" in weather_text:
                                 sym = "☁"
@@ -380,7 +378,7 @@ jobs:
         run: |
           python -c "$PYTHON_SCRIPT"
 
-      # 3. キャッシュの保存
+      # 3. キャッシュの保存（キーにv3を追加）
       - name: Save Run Hour and Temp Cache
         uses: actions/cache/save@v4
         if: success()
@@ -388,4 +386,4 @@ jobs:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: weather-v2-cache-v3-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
