@@ -24,16 +24,16 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 1. キャッシュの復元（確実を期すためv4にアップデート）
+      # 1. キャッシュの復元（確実を期すためv5にアップデート）
       - name: Restore Last Run Hour and Temp Cache
         uses: actions/cache/restore@v4
         with:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v4-
+          key: weather-v2-cache-v5-
           restore-keys: |
-            weather-v2-cache-v4-
+            weather-v2-cache-v5-
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -267,11 +267,9 @@ jobs:
                 with open(history_file, "w") as f:
                     json.dump(clean_history, f)
 
-                # 最も近い時間の予報データを探索するロジック
                 def find_hourly_data(target_hour_str):
                     current_slot_pop = max_prob
                     
-                    # 1. 各時間帯のスロットに最も近いリアルな降水確率(POP)をまず探す
                     if hourly_pops and pop_times:
                         min_p_diff = timedelta(hours=24)
                         base_dt = now + timedelta(days=1) if is_tomorrow_data else now
@@ -283,7 +281,6 @@ jobs:
                                 min_p_diff = diff
                                 current_slot_pop = int(pop)
 
-                    # 2. 天気アイコンの決定
                     if hourly_weather_codes and weather_times:
                         best_code = None
                         min_diff = timedelta(hours=24)
@@ -299,15 +296,6 @@ jobs:
                                 
                         if best_code:
                             sym = code_to_symbol(best_code, current_slot_pop)
-                            
-                            # 【超強力・クレンジング付き午後曇り補正】
-                            # 気象庁の生のテキストデータに含まれる全角スペース・半角スペース・改行コードを除去
-                            clean_weather_text = "".join(weather_text.split())
-                            hour_int = int(target_hour_str)
-                            
-                            if hour_int >= 12 and sym == "☔" and "曇" in clean_weather_text:
-                                sym = "☁"
-                                
                             return sym, current_slot_pop
                             
                     fallback_sym = get_advanced_weather_symbol(weather_text, current_slot_pop).replace("／⚡", "").replace("⚡", "")
@@ -331,6 +319,14 @@ jobs:
                     if now > target_dt + timedelta(hours=2):
                         continue
                     sym, pop = find_hourly_data(hour_val)
+                    
+                    # 【最終解決：最下層での確定上書きルール】
+                    # テロップに「曇」が含まれており、且つ12時以降の枠であれば、
+                    # 上のどのロジックが何を返してこようとも一律で「☁」に強制置換する
+                    clean_weather_text = "".join(weather_text.split())
+                    if int(hour_val) >= 12 and "曇" in clean_weather_text:
+                        sym = "☁"
+                    
                     if hour_val == "06": temp = t_min_num + 1
                     elif hour_val == "09": temp = t_min_num + 4
                     elif hour_val == "12": temp = t_max_num - 2
@@ -395,7 +391,7 @@ jobs:
         run: |
           python -c "$PYTHON_SCRIPT"
 
-      # 3. キャッシュの保存（v4にアップデート）
+      # 3. キャッシュの保存（v5にアップデート）
       - name: Save Run Hour and Temp Cache
         uses: actions/cache/save@v4
         if: success()
@@ -403,4 +399,4 @@ jobs:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v4-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: weather-v2-cache-v5-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
