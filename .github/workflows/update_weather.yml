@@ -24,16 +24,16 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 1. キャッシュの復元（v7にアップデート）
+      # 1. キャッシュの復元（v8にアップデート）
       - name: Restore Last Run Hour and Temp Cache
         uses: actions/cache/restore@v4
         with:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v7-
+          key: weather-v2-cache-v8-
           restore-keys: |
-            weather-v2-cache-v7-
+            weather-v2-cache-v8-
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -269,18 +269,26 @@ jobs:
                     cache_key = f"sym-{target_date_str}-{target_hour_str}"
                     pop_cache_key = f"pop-{target_date_str}-{target_hour_str}"
                     
+                    # 1. 降水確率の検索（気象庁のデータがある場合のみキャッシュを更新）
                     if hourly_pops and pop_times:
                         min_p_diff = timedelta(hours=24)
                         base_dt = now + timedelta(days=1) if is_tomorrow_data else now
                         target_dt = base_dt.replace(hour=int(target_hour_str), minute=0, second=0, microsecond=0)
+                        found_pop = None
                         for t_str, pop in zip(pop_times, hourly_pops):
                             dt_parsed = datetime.fromisoformat(t_str).astimezone(jst)
                             diff = abs(dt_parsed - target_dt)
                             if diff < min_p_diff and diff <= timedelta(hours=3) and str(pop).strip() != "":
                                 min_p_diff = diff
-                                current_slot_pop = int(pop)
-                                history_data[pop_cache_key] = current_slot_pop  # 降水確率のキャッシュ保存/更新
+                                found_pop = int(pop)
+                        
+                        if found_pop is not None:
+                            current_slot_pop = found_pop
+                            history_data[pop_cache_key] = current_slot_pop
+                        elif pop_cache_key in history_data:
+                            current_slot_pop = history_data[pop_cache_key]
 
+                    # 2. 天気コードの検索
                     if hourly_weather_codes and weather_times:
                         best_code = None
                         min_diff = timedelta(hours=24)
@@ -294,17 +302,17 @@ jobs:
                                 min_diff = diff
                                 best_code = str(code).strip()
                                 
+                        # ★気象庁から本物のデータが取得できた時だけキャッシュを保存（上書き）
                         if best_code:
                             sym = code_to_symbol(best_code, current_slot_pop)
-                            history_data[cache_key] = sym  # 時間帯データの最新上書き保存
+                            history_data[cache_key] = sym  
                             return sym, current_slot_pop
 
-                    # もし気象庁の生データから消えていた場合は、過去に保存したキャッシュから復元する
+                    # 3. 気象庁の配列にデータが無かったら、過去の綺麗なキャッシュを探す
                     if cache_key in history_data:
-                        saved_sym = history_data[cache_key]
-                        saved_pop = history_data.get(pop_cache_key, current_slot_pop)
-                        return saved_sym, saved_pop
+                        return history_data[cache_key], current_slot_pop
                             
+                    # 4. キャッシュも気象庁データもない未来の予報は、全体テロップから生成（ただしキャッシュには上書き保存しない）
                     fallback_sym = get_advanced_weather_symbol(weather_text, current_slot_pop).replace("／⚡", "").replace("⚡", "")
                     return fallback_sym, current_slot_pop
 
@@ -397,7 +405,7 @@ jobs:
         run: |
           python -c "$PYTHON_SCRIPT"
 
-      # 3. キャッシュの保存（v7にアップデート）
+      # 3. キャッシュの保存（v8にアップデート）
       - name: Save Run Hour and Temp Cache
         uses: actions/cache/save@v4
         if: success()
@@ -405,4 +413,4 @@ jobs:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v7-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: weather-v2-cache-v8-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
