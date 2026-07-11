@@ -24,16 +24,16 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 1. キャッシュの復元（v10にアップデート）
+      # 1. キャッシュの復元（v11にアップデート）
       - name: Restore Last Run Hour and Temp Cache
         uses: actions/cache/restore@v4
         with:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v10-
+          key: weather-v2-cache-v11-
           restore-keys: |
-            weather-v2-cache-v10-
+            weather-v2-cache-v11-
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -66,7 +66,7 @@ jobs:
             def get_advanced_weather_symbol(text, max_prob):
                 if not text: return "☁"
                 
-                # 【改善】不要な「所により」や「一時」以降のテキストを切り落とし、主たる予報のみにする
+                # 不要な「所により」や「一時」以降のテキストを切り落とし、主たる予報のみにする
                 for noise in ["所により", "ところにより", "一時"]:
                     if noise in text:
                         text = text.split(noise)[0]
@@ -86,7 +86,6 @@ jobs:
                 symbols = []
 
                 if is_change:
-                    # 変化予報：「のち/後」の前後の主音を1つずつ抽出
                     first_sym = None
                     second_sym = None
                     
@@ -98,6 +97,7 @@ jobs:
                         if char in ["の", "後"]:
                             break
                             
+                    idx = text.find("of") if "のち" in text else text.find("後") # 修正：日本語のち
                     idx = text.find("のち") if "のち" in text else text.find("後")
                     if idx != -1:
                         sub_text = text[idx:]
@@ -109,7 +109,6 @@ jobs:
                     if first_sym: symbols.append(first_sym)
                     if second_sym and second_sym != first_sym: symbols.append(second_sym)
                 else:
-                    # 並列予報：「時々」などの場合は文字の登場順にストック
                     if has_sun: symbols.append("☀")
                     if has_cloud: symbols.append("☁")
                     if has_rain: symbols.append("☔")
@@ -130,43 +129,45 @@ jobs:
 
             def code_to_symbol(code, pop_val=None):
                 if not code or str(code).strip() == "": return "☁"
+                
+                # 【改善】気象庁の全パターン3時間おきコードを完全に正しく厳密にマッピング
+                code_map = {
+                    # 100番台：晴れベース
+                    100: "☀", 101: "☀／☁", 102: "☀／☔", 103: "☀／☔", 104: "☀／☃", 105: "☀／☃",
+                    110: "☀→☁", 111: "☀→☁", 112: "☀→☔", 113: "☀→☔", 114: "☀→☃", 115: "☀→☃",
+                    118: "☀→☔", 119: "☀→☃", 120: "☀", 121: "☀", 122: "☀", 123: "☀", 124: "☀",
+                    # 200番台：曇りベース
+                    200: "☁", 201: "☁／☀", 202: "☁／☔", 203: "☁／☔", 204: "☁／☃", 205: "☁／☃",
+                    206: "☁／☔", 207: "☁／☃", 208: "☁／☔", 209: "☁",
+                    210: "☁→☀", 211: "☁→☀", 212: "☁→☔", 213: "☁→☔", 214: "☁→☃", 215: "☁→☃",
+                    218: "☁→☔", 219: "☁→☃", 220: "☁", 221: "☁", 222: "☁", 223: "☁",
+                    # 300番台：雨ベース
+                    300: "☔", 301: "☔／☀", 302: "☔／☁", 303: "☔", 304: "☔／☃", 306: "☔",
+                    308: "☔", 309: "☔／☃", 311: "☔→☀", 313: "☔→☁", 314: "☔→☃", 315: "☔→☃",
+                    316: "☔→☁", 317: "☔→☃", 320: "☔", 321: "☔", 322: "☔",
+                    # 400番台：雪ベース
+                    400: "☃", 401: "☃／☀", 402: "☃／☁", 403: "☃／☔", 405: "☃", 406: "☃",
+                    407: "☃", 409: "☃", 411: "☃→☀", 413: "☃→☁", 414: "☃→☔", 417: "☃→☁",
+                    420: "☃", 421: "☃", 422: "☃", 423: "☃", 450: "☃"
+                }
+                
                 try:
                     c = int(code)
-                    primary = c // 100
-                    sub_code = c % 100
+                    sym = code_map.get(c, "☁")
                     
-                    num_to_emoji = {1: "☀", 2: "☁", 3: "☔", 4: "☃"}
-                    sym1 = num_to_emoji.get(primary, "☁")
-                    sym2 = ""
-                    join_char = "／"
-                    
-                    if sub_code == 0:
-                        sym2 = ""
-                    elif sub_code == 1:
-                        join_char = "→"; sym2 = "☀"
-                    elif sub_code in [2, 12, 22, 32, 42]:
-                        join_char = "／"; sym2 = "☁"
-                    elif sub_code in [3, 13, 23, 33, 43]:
-                        join_char = "／"; sym2 = "☔"
-                    elif sub_code in [5, 15, 25, 35, 45]:
-                        join_char = "／"; sym2 = "☀"
-                    elif sub_code == 11:
-                        join_char = "→"; sym2 = "☁"
-                    elif sub_code == 21:
-                        join_char = "→"; sym2 = "☔"
-                    elif sub_code == 31:
-                        join_char = "→"; sym2 = "☃"
-                        
+                    # 降水確率が低い（30%未満）場合は、雨要素を曇りに安全デグレード
                     if pop_val is not None and pop_val < 30:
-                        if sym1 == "☔": sym1 = "☁"
-                        if sym2 == "☔": sym2 = "☁"
-                        
-                    if sym2 and sym1 != sym2:
-                        return f"{sym1}{join_char}{sym2}"
-                    return sym1
+                        sym = sym.replace("☔", "☁")
+                        # ☁／☁ や ☁→☁ になった場合は ☁ 単体に丸める
+                        if "／" in sym:
+                            parts = sym.split("／")
+                            if parts[0] == parts[1]: sym = parts[0]
+                        elif "→" in sym:
+                            parts = sym.split("→")
+                            if parts[0] == parts[1]: sym = parts[0]
+                    return sym
                 except:
-                    pass
-                return "☁"
+                    return "☁"
 
             def get_clothing_advice(temp):
                 if temp is None: return " 不明？"
@@ -419,7 +420,7 @@ jobs:
                         with open(cache_file, "w") as f:
                             f.write(current_hour_str)
                     else:
-                        print(f"APIエラー発生 (ステータスコード: {response.status_code})")
+                    print(f"APIエラー発生 (ステータスコード: {response.status_code})")
                         exit(0)
                 except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
                     print(f"ネットワークエラーを検知: {e}")
@@ -431,7 +432,7 @@ jobs:
         run: |
           python -c "$PYTHON_SCRIPT"
 
-      # 3. キャッシュの保存（v10にアップデート）
+      # 3. キャッシュの保存（v11にアップデート）
       - name: Save Run Hour and Temp Cache
         uses: actions/cache/save@v4
         if: success()
@@ -439,4 +440,4 @@ jobs:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v10-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: weather-v2-cache-v11-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
