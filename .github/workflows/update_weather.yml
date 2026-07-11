@@ -2,14 +2,12 @@ name: Update Weather and Clothing for Dot V2 (Pure JMA Hourly Eco Version)
 
 on:
   schedule:
-    # 日本時間 06:00〜18:59（UTC 21–23,0–9）の間、1時間に4回実行
     - cron: '17 0-9,21-23 * * *'
     - cron: '37 0-9,21-23 * * *'
     - cron: '47 0-9,21-23 * * *'
     - cron: '53 0-9,21-23 * * *'
   workflow_dispatch:
 
-# 多重実行防止
 concurrency:
   group: daytime-job
   cancel-in-progress: false
@@ -24,16 +22,16 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 1. キャッシュの復元（v11にアップデート）
+      # 1. キャッシュの復元（v12にアップデート）
       - name: Restore Last Run Hour and Temp Cache
         uses: actions/cache/restore@v4
         with:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v11-
+          key: weather-v2-cache-v12-
           restore-keys: |
-            weather-v2-cache-v11-
+            weather-v2-cache-v12-
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -66,30 +64,31 @@ jobs:
             def get_advanced_weather_symbol(text, max_prob):
                 if not text: return "☁"
                 
-                # 不要な「所により」や「一時」以降のテキストを切り落とし、主たる予報のみにする
+                # 最初に対象外のテキストを排除
+                raw_text = text
                 for noise in ["所により", "ところにより", "一時"]:
-                    if noise in text:
-                        text = text.split(noise)[0]
+                    if noise in raw_text:
+                        raw_text = raw_text.split(noise)[0]
 
-                has_sun = "晴" in text
-                has_cloud = "曇" in text
-                has_rain = "雨" in text
-                has_snow = "雪" in text or "暴風雪" in text
+                has_sun = "晴" in raw_text
+                has_cloud = "曇" in raw_text
+                has_rain = "雨" in raw_text
+                has_snow = "雪" in raw_text or "暴風雪" in raw_text
 
-                # 降水確率が低い場合は雨要素を無効化
                 if has_rain and max_prob < 30:
                     has_rain = False
                     if not (has_sun or has_cloud or has_snow):
                         has_cloud = True
 
-                is_change = "のち" in text or "後" in text
+                # 【改善】「のち」または「後、」という明確な区切りがある場合のみ変化予報とする
+                is_change = "のち" in raw_text or "後、" in raw_text
                 symbols = []
 
                 if is_change:
                     first_sym = None
                     second_sym = None
                     
-                    for char in text:
+                    for char in raw_text:
                         if char == "晴" and not first_sym: first_sym = "☀"
                         elif char == "曇" and not first_sym: first_sym = "☁"
                         elif char == "雨" and has_rain and not first_sym: first_sym = "☔"
@@ -97,10 +96,9 @@ jobs:
                         if char in ["の", "後"]:
                             break
                             
-                    idx = text.find("of") if "のち" in text else text.find("後") # 修正：日本語のち
-                    idx = text.find("のち") if "のち" in text else text.find("後")
+                    idx = raw_text.find("のち") if "のち" in raw_text else raw_text.find("後")
                     if idx != -1:
-                        sub_text = text[idx:]
+                        sub_text = raw_text[idx:]
                         if "晴" in sub_text: second_sym = "☀"
                         elif "雨" in sub_text and has_rain: second_sym = "☔"
                         elif "雪" in sub_text or "霙" in sub_text: second_sym = "☃"
@@ -130,22 +128,17 @@ jobs:
             def code_to_symbol(code, pop_val=None):
                 if not code or str(code).strip() == "": return "☁"
                 
-                # 【改善】気象庁の全パターン3時間おきコードを完全に正しく厳密にマッピング
                 code_map = {
-                    # 100番台：晴れベース
                     100: "☀", 101: "☀／☁", 102: "☀／☔", 103: "☀／☔", 104: "☀／☃", 105: "☀／☃",
                     110: "☀→☁", 111: "☀→☁", 112: "☀→☔", 113: "☀→☔", 114: "☀→☃", 115: "☀→☃",
                     118: "☀→☔", 119: "☀→☃", 120: "☀", 121: "☀", 122: "☀", 123: "☀", 124: "☀",
-                    # 200番台：曇りベース
                     200: "☁", 201: "☁／☀", 202: "☁／☔", 203: "☁／☔", 204: "☁／☃", 205: "☁／☃",
                     206: "☁／☔", 207: "☁／☃", 208: "☁／☔", 209: "☁",
                     210: "☁→☀", 211: "☁→☀", 212: "☁→☔", 213: "☁→☔", 214: "☁→☃", 215: "☁→☃",
                     218: "☁→☔", 219: "☁→☃", 220: "☁", 221: "☁", 222: "☁", 223: "☁",
-                    # 300番台：雨ベース
                     300: "☔", 301: "☔／☀", 302: "☔／☁", 303: "☔", 304: "☔／☃", 306: "☔",
                     308: "☔", 309: "☔／☃", 311: "☔→☀", 313: "☔→☁", 314: "☔→☃", 315: "☔→☃",
                     316: "☔→☁", 317: "☔→☃", 320: "☔", 321: "☔", 322: "☔",
-                    # 400番台：雪ベース
                     400: "☃", 401: "☃／☀", 402: "☃／☁", 403: "☃／☔", 405: "☃", 406: "☃",
                     407: "☃", 409: "☃", 411: "☃→☀", 413: "☃→☁", 414: "☃→☔", 417: "☃→☁",
                     420: "☃", 421: "☃", 422: "☃", 423: "☃", 450: "☃"
@@ -155,10 +148,14 @@ jobs:
                     c = int(code)
                     sym = code_map.get(c, "☁")
                     
-                    # 降水確率が低い（30%未満）場合は、雨要素を曇りに安全デグレード
-                    if pop_val is not None and pop_val < 30:
-                        sym = sym.replace("☔", "☁")
-                        # ☁／☁ や ☁→☁ になった場合は ☁ 単体に丸める
+                    # 【改善】降水確率が50%以下かつ雨単体コード（300番台）の場合、体感に合わせて「☁／☔」にマイルド化
+                    if pop_val is not None:
+                        if pop_val < 30:
+                            sym = sym.replace("☔", "☁")
+                        elif pop_val <= 50 and sym == "☔":
+                            sym = "☁／☔"
+                            
+                        # 重複記号の丸め処理
                         if "／" in sym:
                             parts = sym.split("／")
                             if parts[0] == parts[1]: sym = parts[0]
@@ -432,7 +429,7 @@ jobs:
         run: |
           python -c "$PYTHON_SCRIPT"
 
-      # 3. キャッシュの保存（v11にアップデート）
+      # 3. キャッシュの保存（v12にアップデート）
       - name: Save Run Hour and Temp Cache
         uses: actions/cache/save@v4
         if: success()
@@ -440,4 +437,4 @@ jobs:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v11-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: weather-v2-cache-v12-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
