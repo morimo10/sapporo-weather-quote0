@@ -372,9 +372,9 @@ jobs:
                     
                     sym_len = len(sym)
                     if sym_len == 1:
-                        padded_sym = sym + "　　 "
+                        padded_sym = sym + "   "
                     elif sym_len == 2:
-                        padded_sym = sym + "　  "
+                        padded_sym = sym + "   "
                     elif sym_len == 3:
                         padded_sym = sym + "  "
                     else:
@@ -420,7 +420,7 @@ jobs:
                         with open(cache_file, "w") as f:
                             f.write(current_hour_str)
                     else:
-                    print(f"APIエラー発生 (ステータスコード: {response.status_code})")
+                        print(f"APIエラー発生 (ステータスコード: {response.status_code})")
                         exit(0)
                 except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
                     print(f"ネットワークエラーを検知: {e}")
