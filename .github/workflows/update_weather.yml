@@ -24,16 +24,16 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 1. キャッシュの復元（v8にアップデート）
+      # 1. キャッシュの復元（v10にアップデート）
       - name: Restore Last Run Hour and Temp Cache
         uses: actions/cache/restore@v4
         with:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v8-
+          key: weather-v2-cache-v10-
           restore-keys: |
-            weather-v2-cache-v8-
+            weather-v2-cache-v10-
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -65,37 +65,68 @@ jobs:
 
             def get_advanced_weather_symbol(text, max_prob):
                 if not text: return "☁"
-                if "暴風雨" in text or "暴風雪" in text: return "⛄"
                 
-                kanji_to_emoji = {"晴": "☀", "曇": "☁", "雨": "☔", "雪": "☃"}
-                found_elements = []
-                
-                for k, emoji in kanji_to_emoji.items():
-                    idx = text.find(k)
+                # 【改善】不要な「所により」や「一時」以降のテキストを切り落とし、主たる予報のみにする
+                for noise in ["所により", "ところにより", "一時"]:
+                    if noise in text:
+                        text = text.split(noise)[0]
+
+                has_sun = "晴" in text
+                has_cloud = "曇" in text
+                has_rain = "雨" in text
+                has_snow = "雪" in text or "暴風雪" in text
+
+                # 降水確率が低い場合は雨要素を無効化
+                if has_rain and max_prob < 30:
+                    has_rain = False
+                    if not (has_sun or has_cloud or has_snow):
+                        has_cloud = True
+
+                is_change = "のち" in text or "後" in text
+                symbols = []
+
+                if is_change:
+                    # 変化予報：「のち/後」の前後の主音を1つずつ抽出
+                    first_sym = None
+                    second_sym = None
+                    
+                    for char in text:
+                        if char == "晴" and not first_sym: first_sym = "☀"
+                        elif char == "曇" and not first_sym: first_sym = "☁"
+                        elif char == "雨" and has_rain and not first_sym: first_sym = "☔"
+                        elif char in ["雪", "霰", "霙"] and not first_sym: first_sym = "☃"
+                        if char in ["の", "後"]:
+                            break
+                            
+                    idx = text.find("のち") if "のち" in text else text.find("後")
                     if idx != -1:
-                        actual_emoji = "☁" if (k == "雨" and max_prob < 30) else emoji
-                        found_elements.append((idx, actual_emoji))
-                
-                found_elements.sort(key=lambda x: x[0])
-                symbols = [item[1] for item in found_elements]
-                
+                        sub_text = text[idx:]
+                        if "晴" in sub_text: second_sym = "☀"
+                        elif "雨" in sub_text and has_rain: second_sym = "☔"
+                        elif "雪" in sub_text or "霙" in sub_text: second_sym = "☃"
+                        elif "曇" in sub_text: second_sym = "☁"
+
+                    if first_sym: symbols.append(first_sym)
+                    if second_sym and second_sym != first_sym: symbols.append(second_sym)
+                else:
+                    # 並列予報：「時々」などの場合は文字の登場順にストック
+                    if has_sun: symbols.append("☀")
+                    if has_cloud: symbols.append("☁")
+                    if has_rain: symbols.append("☔")
+                    if has_snow: symbols.append("☃")
+
                 unique_symbols = []
                 for s in symbols:
-                    if not unique_symbols or unique_symbols[-1] != s:
+                    if s not in unique_symbols:
                         unique_symbols.append(s)
-                
-                join_char = "→" if ("後" in text or "のち" in text) else "／"
-                
+
+                join_char = "→" if is_change else "／"
                 if len(unique_symbols) >= 2:
-                    base_sym = f"{unique_symbols[0]}{join_char}{unique_symbols[1]}"
+                    return f"{unique_symbols[0]}{join_char}{unique_symbols[1]}"
                 elif len(unique_symbols) == 1:
-                    base_sym = unique_symbols[0]
-                else:
-                    base_sym = "☁"
-                    
-                if "雷" in text and max_prob >= 30:
-                    return f"{base_sym}／⚡"
-                return base_sym
+                    return unique_symbols[0]
+                
+                return "☁"
 
             def code_to_symbol(code, pop_val=None):
                 if not code or str(code).strip() == "": return "☁"
@@ -263,13 +294,11 @@ jobs:
                 if is_tomorrow_data and today_date_str not in history_data:
                     if len(temps) >= 4: history_data[today_date_str] = int(temps[1])
 
-                # 時間ごとの最新の検索結果を永続ストック＆バックアップ呼び出しするロジック
                 def find_hourly_data(target_hour_str):
                     current_slot_pop = max_prob
                     cache_key = f"sym-{target_date_str}-{target_hour_str}"
                     pop_cache_key = f"pop-{target_date_str}-{target_hour_str}"
                     
-                    # 1. 降水確率の検索（気象庁のデータがある場合のみキャッシュを更新）
                     if hourly_pops and pop_times:
                         min_p_diff = timedelta(hours=24)
                         base_dt = now + timedelta(days=1) if is_tomorrow_data else now
@@ -288,7 +317,6 @@ jobs:
                         elif pop_cache_key in history_data:
                             current_slot_pop = history_data[pop_cache_key]
 
-                    # 2. 天気コードの検索
                     if hourly_weather_codes and weather_times:
                         best_code = None
                         min_diff = timedelta(hours=24)
@@ -302,18 +330,15 @@ jobs:
                                 min_diff = diff
                                 best_code = str(code).strip()
                                 
-                        # ★気象庁から本物のデータが取得できた時だけキャッシュを保存（上書き）
                         if best_code:
                             sym = code_to_symbol(best_code, current_slot_pop)
                             history_data[cache_key] = sym  
                             return sym, current_slot_pop
 
-                    # 3. 気象庁の配列にデータが無かったら、過去の綺麗なキャッシュを探す
                     if cache_key in history_data:
                         return history_data[cache_key], current_slot_pop
                             
-                    # 4. キャッシュも気象庁データもない未来の予報は、全体テロップから生成（ただしキャッシュには上書き保存しない）
-                    fallback_sym = get_advanced_weather_symbol(weather_text, current_slot_pop).replace("／⚡", "").replace("⚡", "")
+                    fallback_sym = get_advanced_weather_symbol(weather_text, current_slot_pop)
                     return fallback_sym, current_slot_pop
 
                 forecast_lines = [f"低:{t_min_num}°C 高:{t_max_num}°C{diff_str} 傘:{prob_str}{umbrella_mark}"]
@@ -349,14 +374,15 @@ jobs:
                         padded_sym = sym + "　　 "
                     elif sym_len == 2:
                         padded_sym = sym + "　  "
-                    else:
+                    elif sym_len == 3:
                         padded_sym = sym + "  "
+                    else:
+                        padded_sym = sym + " "
                         
                     forecast_lines.append(f"{label} {padded_sym}{temp_str}°C{get_clothing_advice(temp)}")
                     valid_rows_count += 1
                 weather_message = "\n".join(forecast_lines)
                 
-                # 履歴ファイルのクリーンアップ（古いデータの間引きと保存）
                 clean_history = {k: v for k, v in history_data.items() if "sym-" in k or "pop-" in k or (k.count("-") == 2 and (now - datetime.strptime(k, "%Y-%m-%d").replace(tzinfo=jst)).days <= 3)}
                 with open(history_file, "w") as f:
                     json.dump(clean_history, f)
@@ -405,7 +431,7 @@ jobs:
         run: |
           python -c "$PYTHON_SCRIPT"
 
-      # 3. キャッシュの保存（v8にアップデート）
+      # 3. キャッシュの保存（v10にアップデート）
       - name: Save Run Hour and Temp Cache
         uses: actions/cache/save@v4
         if: success()
@@ -413,4 +439,4 @@ jobs:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v8-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: weather-v2-cache-v10-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
