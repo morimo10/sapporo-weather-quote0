@@ -22,16 +22,16 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 1. キャッシュの復元（v15にアップデート）
+      # 1. キャッシュの復元（v16にアップデート）
       - name: Restore Last Run Hour and Temp Cache
         uses: actions/cache/restore@v4
         with:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v15-
+          key: weather-v2-cache-v16-
           restore-keys: |
-            weather-v2-cache-v15-
+            weather-v2-cache-v16-
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -43,7 +43,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      # 2. メイン処理の実行（ログ出力付き）
+      # 2. メイン処理の実行
       - name: Generate and Push to Dot API
         env:
           QUOTE0_API_KEY: ${{ secrets.QUOTE0_API_KEY }}
@@ -64,8 +64,14 @@ jobs:
             def get_advanced_weather_symbol(text, max_prob):
                 if not text: return "☁"
                 
-                raw_text = text
-                for noise in ["所により", "ところにより", "一時", "雷を伴う", "カミナリ"]:
+                # スペースを完全に排除して表記揺れを漢字へ統一
+                raw_text = text.replace(" ", "").replace("\u3000", "")
+                raw_text = raw_text.replace("晴れ", "晴").replace("はれ", "晴")
+                raw_text = raw_text.replace("くもり", "曇").replace("曇り", "曇")
+                raw_text = raw_text.replace("雨", "雨").replace("あめ", "雨")
+                raw_text = raw_text.replace("雪", "雪").replace("ゆき", "雪")
+
+                for noise in ["所により", "ところにより", "一時", "雷を伴う", "カミナリ", "激しく降る", "まで"]:
                     raw_text = raw_text.replace(noise, "")
 
                 has_sun = "晴" in raw_text
@@ -417,7 +423,7 @@ jobs:
         run: |
           python -c "$PYTHON_SCRIPT"
 
-      # 3. キャッシュの保存（v15にアップデート）
+      # 3. キャッシュの保存（v16にアップデート）
       - name: Save Run Hour and Temp Cache
         uses: actions/cache/save@v4
         if: success()
@@ -425,4 +431,4 @@ jobs:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v15-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: weather-v2-cache-v16-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
