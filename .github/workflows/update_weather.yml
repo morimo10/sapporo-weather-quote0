@@ -22,16 +22,16 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 1. キャッシュの復元（v18にアップデート）
+      # 1. キャッシュの復元（v19にアップデート）
       - name: Restore Last Run Hour and Temp Cache
         uses: actions/cache/restore@v4
         with:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v18-
+          key: weather-v2-cache-v19-
           restore-keys: |
-            weather-v2-cache-v18-
+            weather-v2-cache-v19-
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -237,6 +237,7 @@ jobs:
                 hourly_weather_codes = sapporo_hourly.get('weatherCode', [])
                 hourly_pops = sapporo_hourly.get('pops', [])
 
+                # 気象庁のタイムスタンプ配列（ISO 8601形式）を正確にマッピング
                 weather_times = hourly_times_root[-len(hourly_weather_codes):] if hourly_weather_codes else []
                 pop_times = hourly_times_root[-len(hourly_pops):] if hourly_pops else []
 
@@ -308,42 +309,35 @@ jobs:
                     cache_key = f"sym-{target_date_str}-{target_hour_str}"
                     pop_cache_key = f"pop-{target_date_str}-{target_hour_str}"
                     
+                    base_dt = now + timedelta(days=1) if is_tomorrow_data else now
+                    target_dt = base_dt.replace(hour=int(target_hour_str), minute=0, second=0, microsecond=0)
+
+                    # 1. 降水確率（POP）の日時完全一致マッピング
                     if hourly_pops and pop_times:
-                        min_p_diff = timedelta(hours=24)
-                        base_dt = now + timedelta(days=1) if is_tomorrow_data else now
-                        target_dt = base_dt.replace(hour=int(target_hour_str), minute=0, second=0, microsecond=0)
-                        found_pop = None
                         for t_str, pop in zip(pop_times, hourly_pops):
                             dt_parsed = datetime.fromisoformat(t_str).astimezone(jst)
-                            diff = abs(dt_parsed - target_dt)
-                            if diff < min_p_diff and diff <= timedelta(hours=5) and str(pop).strip() != "":
-                                min_p_diff = diff
-                                found_pop = int(pop)
-                        if found_pop is not None:
-                            current_slot_pop = found_pop
-                            history_data[pop_cache_key] = current_slot_pop
-                        elif pop_cache_key in history_data:
-                            current_slot_pop = history_data[pop_cache_key]
+                            if dt_parsed == target_dt and str(pop).strip() != "":
+                                current_slot_pop = int(pop)
+                                history_data[pop_cache_key] = current_slot_pop
+                                break
+                        else:
+                            if pop_cache_key in history_data:
+                                current_slot_pop = history_data[pop_cache_key]
 
+                    # 2. 天気コード（weatherCode）の日時完全一致マッピング
                     if hourly_weather_codes and weather_times:
-                        best_code = None
-                        min_diff = timedelta(hours=24)
-                        base_dt = now + timedelta(days=1) if is_tomorrow_data else now
-                        target_dt = base_dt.replace(hour=int(target_hour_str), minute=0, second=0, microsecond=0)
                         for t_str, code in zip(weather_times, hourly_weather_codes):
                             dt_parsed = datetime.fromisoformat(t_str).astimezone(jst)
-                            diff = abs(dt_parsed - target_dt)
-                            if diff < min_diff and diff <= timedelta(hours=5):
-                                min_diff = diff
-                                best_code = str(code).strip()
-                        if best_code:
-                            sym = code_to_symbol(best_code, current_slot_pop)
-                            history_data[cache_key] = sym  
-                            return sym, current_slot_pop
+                            if dt_parsed == target_dt and str(code).strip() != "":
+                                sym = code_to_symbol(str(code).strip(), current_slot_pop)
+                                history_data[cache_key] = sym  
+                                return sym, current_slot_pop
 
+                    # 完全一致がなくても、過去の同スロットキャッシュがあれば再利用
                     if cache_key in history_data:
                         return history_data[cache_key], current_slot_pop
                             
+                    # それでも無い時だけ、最終手段として全体のテキストから該当スロットの天気を推測
                     fallback_sym = get_advanced_weather_symbol(weather_text, current_slot_pop)
                     return fallback_sym, current_slot_pop
 
@@ -372,9 +366,8 @@ jobs:
                     temp_str = f"{temp:02d}"
                     sym_len = len(sym)
                     
-                    # 3文字以上の複合記号でもズレたり被ったりしないパディング設計へ刷新
-                    if sym_len == 1: padded_sym = sym + "　　"
-                    elif sym_len == 2: padded_sym = sym + "　"
+                    if sym_len == 1: padded_sym = sym + "  "
+                    elif sym_len == 2: padded_sym = sym + " "
                     else: padded_sym = sym + " "
                         
                     forecast_lines.append(f"{label} {padded_sym}{temp_str}°C{get_clothing_advice(temp)}")
@@ -423,7 +416,7 @@ jobs:
         run: |
           python -c "$PYTHON_SCRIPT"
 
-      # 3. キャッシュの保存（v18にアップデート）
+      # 3. キャッシュの保存（v19にアップデート）
       - name: Save Run Hour and Temp Cache
         uses: actions/cache/save@v4
         if: success()
@@ -431,4 +424,4 @@ jobs:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v18-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: weather-v2-cache-v19-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
