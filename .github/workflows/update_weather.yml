@@ -22,16 +22,16 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 1. キャッシュの復元（v19にアップデート）
+      # 1. キャッシュの復元（v20にアップデート）
       - name: Restore Last Run Hour and Temp Cache
         uses: actions/cache/restore@v4
         with:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v19-
+          key: weather-v2-cache-v20-
           restore-keys: |
-            weather-v2-cache-v19-
+            weather-v2-cache-v20-
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -174,6 +174,29 @@ jobs:
                 elif temp >= 10: return " コート"
                 else: return " ダウン"
 
+            # 日本語テキストから該当時間帯の天気を高度に推測・補正する関数
+            def correct_symbol_by_time_text(base_sym, text, hour_str):
+                if not text: return base_sym
+                h = int(hour_str)
+                
+                # 「昼過ぎから夕方 雨」などのケースをパース
+                if "雨" in text:
+                    # 12時は「昼前〜昼過ぎ」などの明記がない限り、基本的には「昼過ぎから」であればまだ雨ではない(曇り)
+                    if h == 12 and "昼過ぎ" in text and ("から" in text or "後" in text) and "昼前" not in text:
+                        return "☁"
+                    # 15時、18時は「昼過ぎ」「夕方」「夜のはじめ頃」の雨リスクに直撃
+                    if h in [15, 18]:
+                        if any(x in text for x in ["昼過ぎ", "夕方", "日中", "午後"]):
+                            return "☔" if "☔" not in base_sym else base_sym
+                
+                if "晴" in text:
+                    if h == 12 and "昼前" in text and "昼過ぎ" in text:
+                        return "☀"
+                    if h == 15 and "日中" in text:
+                        return "☀"
+                        
+                return base_sym
+
             try:
                 jst = timezone(timedelta(hours=9))
                 now_utc = datetime.now(timezone.utc)
@@ -190,9 +213,6 @@ jobs:
                     print(f"気象庁サーバーへの接続または名前解決に失敗しました: {e}")
                     exit(0)
 
-                # =======================================================
-                # 【生データ出力デバッグログ】
-                # =======================================================
                 print("================ [JMA RAW DATA LOG] ================")
                 try:
                     print(f"【生データ全体 (エリア情報)】:\n{json.dumps(res[0]['timeSeries'][0]['areas'], ensure_ascii=False, indent=2)}")
@@ -237,7 +257,6 @@ jobs:
                 hourly_weather_codes = sapporo_hourly.get('weatherCode', [])
                 hourly_pops = sapporo_hourly.get('pops', [])
 
-                # 気象庁のタイムスタンプ配列（ISO 8601形式）を正確にマッピング
                 weather_times = hourly_times_root[-len(hourly_weather_codes):] if hourly_weather_codes else []
                 pop_times = hourly_times_root[-len(hourly_pops):] if hourly_pops else []
 
@@ -312,7 +331,6 @@ jobs:
                     base_dt = now + timedelta(days=1) if is_tomorrow_data else now
                     target_dt = base_dt.replace(hour=int(target_hour_str), minute=0, second=0, microsecond=0)
 
-                    # 1. 降水確率（POP）の日時完全一致マッピング
                     if hourly_pops and pop_times:
                         for t_str, pop in zip(pop_times, hourly_pops):
                             dt_parsed = datetime.fromisoformat(t_str).astimezone(jst)
@@ -324,21 +342,21 @@ jobs:
                             if pop_cache_key in history_data:
                                 current_slot_pop = history_data[pop_cache_key]
 
-                    # 2. 天気コード（weatherCode）の日時完全一致マッピング
                     if hourly_weather_codes and weather_times:
                         for t_str, code in zip(weather_times, hourly_weather_codes):
                             dt_parsed = datetime.fromisoformat(t_str).astimezone(jst)
                             if dt_parsed == target_dt and str(code).strip() != "":
                                 sym = code_to_symbol(str(code).strip(), current_slot_pop)
+                                # 【重要】気象庁コードが一律の時のために、テキスト解析による時間帯補正を挟む
+                                sym = correct_symbol_by_time_text(sym, weather_text, target_hour_str)
                                 history_data[cache_key] = sym  
                                 return sym, current_slot_pop
 
-                    # 完全一致がなくても、過去の同スロットキャッシュがあれば再利用
                     if cache_key in history_data:
                         return history_data[cache_key], current_slot_pop
                             
-                    # それでも無い時だけ、最終手段として全体のテキストから該当スロットの天気を推測
                     fallback_sym = get_advanced_weather_symbol(weather_text, current_slot_pop)
+                    fallback_sym = correct_symbol_by_time_text(fallback_sym, weather_text, target_hour_str)
                     return fallback_sym, current_slot_pop
 
                 forecast_lines = [f"低:{t_min_num}°C 高:{t_max_num}°C{diff_str} 傘:{prob_str}{umbrella_mark}"]
@@ -416,7 +434,7 @@ jobs:
         run: |
           python -c "$PYTHON_SCRIPT"
 
-      # 3. キャッシュの保存（v19にアップデート）
+      # 3. キャッシュの保存（v20にアップデート）
       - name: Save Run Hour and Temp Cache
         uses: actions/cache/save@v4
         if: success()
@@ -424,4 +442,4 @@ jobs:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v19-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: weather-v2-cache-v20-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
