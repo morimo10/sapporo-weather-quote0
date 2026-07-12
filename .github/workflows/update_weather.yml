@@ -22,16 +22,16 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 1. キャッシュの復元（v12にアップデート）
+      # 1. キャッシュの復元（v15にアップデート）
       - name: Restore Last Run Hour and Temp Cache
         uses: actions/cache/restore@v4
         with:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v12-
+          key: weather-v2-cache-v15-
           restore-keys: |
-            weather-v2-cache-v12-
+            weather-v2-cache-v15-
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -43,7 +43,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      # 2. メイン処理の実行
+      # 2. メイン処理の実行（ログ出力付き）
       - name: Generate and Push to Dot API
         env:
           QUOTE0_API_KEY: ${{ secrets.QUOTE0_API_KEY }}
@@ -64,11 +64,9 @@ jobs:
             def get_advanced_weather_symbol(text, max_prob):
                 if not text: return "☁"
                 
-                # 最初に対象外のテキストを排除
                 raw_text = text
-                for noise in ["所により", "ところにより", "一時"]:
-                    if noise in raw_text:
-                        raw_text = raw_text.split(noise)[0]
+                for noise in ["所により", "ところにより", "一時", "雷を伴う", "カミナリ"]:
+                    raw_text = raw_text.replace(noise, "")
 
                 has_sun = "晴" in raw_text
                 has_cloud = "曇" in raw_text
@@ -80,8 +78,7 @@ jobs:
                     if not (has_sun or has_cloud or has_snow):
                         has_cloud = True
 
-                # 【改善】「のち」または「後、」という明確な区切りがある場合のみ変化予報とする
-                is_change = "のち" in raw_text or "後、" in raw_text
+                is_change = "のち" in raw_text or "後、" in raw_text or ("後" in raw_text and not any(x in raw_text for x in ["午後", "午前", "夜後"]))
                 symbols = []
 
                 if is_change:
@@ -107,10 +104,11 @@ jobs:
                     if first_sym: symbols.append(first_sym)
                     if second_sym and second_sym != first_sym: symbols.append(second_sym)
                 else:
-                    if has_sun: symbols.append("☀")
-                    if has_cloud: symbols.append("☁")
-                    if has_rain: symbols.append("☔")
-                    if has_snow: symbols.append("☃")
+                    for char in raw_text:
+                        if char == "晴": symbols.append("☀")
+                        elif char == "曇": symbols.append("☁")
+                        elif char == "雨" and has_rain: symbols.append("☔")
+                        elif char in ["雪", "霰", "霙"]: symbols.append("☃")
 
                 unique_symbols = []
                 for s in symbols:
@@ -147,15 +145,11 @@ jobs:
                 try:
                     c = int(code)
                     sym = code_map.get(c, "☁")
-                    
-                    # 【改善】降水確率が50%以下かつ雨単体コード（300番台）の場合、体感に合わせて「☁／☔」にマイルド化
                     if pop_val is not None:
                         if pop_val < 30:
                             sym = sym.replace("☔", "☁")
                         elif pop_val <= 50 and sym == "☔":
                             sym = "☁／☔"
-                            
-                        # 重複記号の丸め処理
                         if "／" in sym:
                             parts = sym.split("／")
                             if parts[0] == parts[1]: sym = parts[0]
@@ -191,6 +185,19 @@ jobs:
                     print(f"気象庁サーバーへの接続または名前解決に失敗しました: {e}")
                     exit(0)
 
+                # =======================================================
+                # 【生データ出力デバッグログ】
+                # =======================================================
+                print("================ [JMA RAW DATA LOG] ================")
+                try:
+                    print(f"【生データ全体 (エリア情報)】:\n{json.dumps(res[0]['timeSeries'][0]['areas'], ensure_ascii=False, indent=2)}")
+                    base_series_debug = res[0]['timeSeries'][0]
+                    sapporo_weather_debug = next((a for a in base_series_debug['areas'] if a['area']['code'] == '016010'), base_series_debug['areas'][0])
+                    print(f"【札幌管区の生テキスト配列】: {sapporo_weather_debug.get('weathers', [])}")
+                except Exception as log_err:
+                    print(f"ログ出力中にエラーが発生しました: {log_err}")
+                print("====================================================")
+
                 if 17 <= current_hour <= 23:
                     is_tomorrow_data = True
                     label_head = "明日"
@@ -204,14 +211,13 @@ jobs:
                 current_hour_str = now.strftime("%Y-%m-%d-%H")
                 cache_file = "last_run_hour.txt"
                 history_file = "weather_history.json"
-                print("--- Actionsキャッシュによる二重実行チェック中 ---")
+                
                 if os.path.exists(cache_file):
                     with open(cache_file, "r") as f:
                         last_run_hour = f.read().strip()
                     if last_run_hour == current_hour_str:
-                        print(f"判別結果: すでに【{now.strftime('%H:00')}時台】の最初の実行は完了しています。")
+                        print(f"すでに【{now.strftime('%H:00')}時台】の最初の実行は完了しています。")
                         exit(0)
-                print(f"判別結果: 新しい時間帯【{now.strftime('%H:00')}時台】の初実行です。処理を進めます。")
 
                 base_series = res[0]['timeSeries'][0]
                 weather_areas = base_series['areas']
@@ -308,7 +314,6 @@ jobs:
                             if diff < min_p_diff and diff <= timedelta(hours=3) and str(pop).strip() != "":
                                 min_p_diff = diff
                                 found_pop = int(pop)
-                        
                         if found_pop is not None:
                             current_slot_pop = found_pop
                             history_data[pop_cache_key] = current_slot_pop
@@ -320,14 +325,12 @@ jobs:
                         min_diff = timedelta(hours=24)
                         base_dt = now + timedelta(days=1) if is_tomorrow_data else now
                         target_dt = base_dt.replace(hour=int(target_hour_str), minute=0, second=0, microsecond=0)
-                        
                         for t_str, code in zip(weather_times, hourly_weather_codes):
                             dt_parsed = datetime.fromisoformat(t_str).astimezone(jst)
                             diff = abs(dt_parsed - target_dt)
                             if diff < min_diff and diff <= timedelta(hours=3):
                                 min_diff = diff
                                 best_code = str(code).strip()
-                                
                         if best_code:
                             sym = code_to_symbol(best_code, current_slot_pop)
                             history_data[cache_key] = sym  
@@ -341,12 +344,8 @@ jobs:
 
                 forecast_lines = [f"低:{t_min_num}°C 高:{t_max_num}°C{diff_str} 傘:{prob_str}{umbrella_mark}"]
                 hourly_slots = [
-                    ("06", "06:00"),
-                    ("09", "09:00"),
-                    ("12", "12:00"),
-                    ("15", "15:00"),
-                    ("18", "18:00"),
-                    ("21", "21:00")
+                    ("06", "06:00"), ("09", "09:00"), ("12", "12:00"),
+                    ("15", "15:00"), ("18", "18:00"), ("21", "21:00")
                 ]
                 valid_rows_count = 0
                 for hour_val, label in hourly_slots:
@@ -366,16 +365,11 @@ jobs:
                     else: temp = t_min_num + 2
                     
                     temp_str = f"{temp:02d}"
-                    
                     sym_len = len(sym)
-                    if sym_len == 1:
-                        padded_sym = sym + "   "
-                    elif sym_len == 2:
-                        padded_sym = sym + "   "
-                    elif sym_len == 3:
-                        padded_sym = sym + "  "
-                    else:
-                        padded_sym = sym + " "
+                    if sym_len == 1: padded_sym = sym + "   "
+                    elif sym_len == 2: padded_sym = sym + "   "
+                    elif sym_len == 3: padded_sym = sym + "  "
+                    else: padded_sym = sym + " "
                         
                     forecast_lines.append(f"{label} {padded_sym}{temp_str}°C{get_clothing_advice(temp)}")
                     valid_rows_count += 1
@@ -386,7 +380,6 @@ jobs:
                     json.dump(clean_history, f)
 
                 print("--- 送信データ内容ログ ---")
-                print(f"JST Time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
                 print(f"Title : {title_text}")
                 print(f"Message:\n{weather_message}")
                 print("---------------------------------------------------------")
@@ -400,13 +393,8 @@ jobs:
                     "title": title_text,
                     "message": weather_message,
                     "styles": {
-                        "title": {
-                          "fontFamily": "ChillRoundGothic",
-                          "fontSize": 24
-                        },
-                        "message": {
-                          "fontFamily": "ChillRoundGothic"
-                        }
+                        "title": { "fontFamily": "ChillRoundGothic", "fontSize": 24 },
+                        "message": { "fontFamily": "ChillRoundGothic" }
                     }
                 }
                 
@@ -429,7 +417,7 @@ jobs:
         run: |
           python -c "$PYTHON_SCRIPT"
 
-      # 3. キャッシュの保存（v12にアップデート）
+      # 3. キャッシュの保存（v15にアップデート）
       - name: Save Run Hour and Temp Cache
         uses: actions/cache/save@v4
         if: success()
@@ -437,4 +425,4 @@ jobs:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v12-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: weather-v2-cache-v15-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
