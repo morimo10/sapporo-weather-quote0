@@ -22,16 +22,16 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 1. キャッシュの復元（v16にアップデート）
+      # 1. キャッシュの復元（v18にアップデート）
       - name: Restore Last Run Hour and Temp Cache
         uses: actions/cache/restore@v4
         with:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v16-
+          key: weather-v2-cache-v18-
           restore-keys: |
-            weather-v2-cache-v16-
+            weather-v2-cache-v18-
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -64,7 +64,6 @@ jobs:
             def get_advanced_weather_symbol(text, max_prob):
                 if not text: return "☁"
                 
-                # スペースを完全に排除して表記揺れを漢字へ統一
                 raw_text = text.replace(" ", "").replace("\u3000", "")
                 raw_text = raw_text.replace("晴れ", "晴").replace("はれ", "晴")
                 raw_text = raw_text.replace("くもり", "曇").replace("曇り", "曇")
@@ -317,7 +316,7 @@ jobs:
                         for t_str, pop in zip(pop_times, hourly_pops):
                             dt_parsed = datetime.fromisoformat(t_str).astimezone(jst)
                             diff = abs(dt_parsed - target_dt)
-                            if diff < min_p_diff and diff <= timedelta(hours=3) and str(pop).strip() != "":
+                            if diff < min_p_diff and diff <= timedelta(hours=5) and str(pop).strip() != "":
                                 min_p_diff = diff
                                 found_pop = int(pop)
                         if found_pop is not None:
@@ -334,7 +333,7 @@ jobs:
                         for t_str, code in zip(weather_times, hourly_weather_codes):
                             dt_parsed = datetime.fromisoformat(t_str).astimezone(jst)
                             diff = abs(dt_parsed - target_dt)
-                            if diff < min_diff and diff <= timedelta(hours=3):
+                            if diff < min_diff and diff <= timedelta(hours=5):
                                 min_diff = diff
                                 best_code = str(code).strip()
                         if best_code:
@@ -372,9 +371,10 @@ jobs:
                     
                     temp_str = f"{temp:02d}"
                     sym_len = len(sym)
-                    if sym_len == 1: padded_sym = sym + "   "
-                    elif sym_len == 2: padded_sym = sym + "   "
-                    elif sym_len == 3: padded_sym = sym + "  "
+                    
+                    # 3文字以上の複合記号でもズレたり被ったりしないパディング設計へ刷新
+                    if sym_len == 1: padded_sym = sym + "　　"
+                    elif sym_len == 2: padded_sym = sym + "　"
                     else: padded_sym = sym + " "
                         
                     forecast_lines.append(f"{label} {padded_sym}{temp_str}°C{get_clothing_advice(temp)}")
@@ -423,7 +423,7 @@ jobs:
         run: |
           python -c "$PYTHON_SCRIPT"
 
-      # 3. キャッシュの保存（v16にアップデート）
+      # 3. キャッシュの保存（v18にアップデート）
       - name: Save Run Hour and Temp Cache
         uses: actions/cache/save@v4
         if: success()
@@ -431,4 +431,4 @@ jobs:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v16-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: weather-v2-cache-v18-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
