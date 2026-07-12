@@ -22,16 +22,16 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 1. キャッシュの復元（v20にアップデート）
+      # 1. キャッシュの復元（v21にアップデート）
       - name: Restore Last Run Hour and Temp Cache
         uses: actions/cache/restore@v4
         with:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v20-
+          key: weather-v2-cache-v21-
           restore-keys: |
-            weather-v2-cache-v20-
+            weather-v2-cache-v21-
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -174,25 +174,27 @@ jobs:
                 elif temp >= 10: return " コート"
                 else: return " ダウン"
 
-            # 日本語テキストから該当時間帯の天気を高度に推測・補正する関数
             def correct_symbol_by_time_text(base_sym, text, hour_str):
                 if not text: return base_sym
                 h = int(hour_str)
                 
-                # 「昼過ぎから夕方 雨」などのケースをパース
-                if "雨" in text:
-                    # 12時は「昼前〜昼過ぎ」などの明記がない限り、基本的には「昼過ぎから」であればまだ雨ではない(曇り)
-                    if h == 12 and "昼過ぎ" in text and ("から" in text or "後" in text) and "昼前" not in text:
-                        return "☁"
-                    # 15時、18時は「昼過ぎ」「夕方」「夜のはじめ頃」の雨リスクに直撃
-                    if h in [15, 18]:
-                        if any(x in text for x in ["昼過ぎ", "夕方", "日中", "午後"]):
-                            return "☔" if "☔" not in base_sym else base_sym
+                # 「昼過ぎから夕方 雨」などのパターン抽出用に正規化
+                clean_text = text.replace(" ", "").replace("\u3000", "")
                 
-                if "晴" in text:
-                    if h == 12 and "昼前" in text and "昼過ぎ" in text:
+                if "雨" in clean_text:
+                    # 12時は「昼過ぎから」であれば、12:00時点ではまだくもり
+                    if h == 12 and "昼過ぎ" in clean_text and ("から" in clean_text or "後" in clean_text) and "昼前" not in clean_text:
+                        return "☁"
+                    # 15時、18時は「昼過ぎから夕方」「夕方から」などの雨ターゲットゾーンに直撃するため、ベースを「☔」単体に完全上書き
+                    if h in [15, 18]:
+                        if any(x in clean_text for x in ["昼過ぎ", "夕方", "日中", "午後"]):
+                            return "☔"
+                            
+                if "晴" in clean_text:
+                    # 「昼前から昼過ぎ晴れ」などの指定で12時に完全に該当する場合、晴れに上書き
+                    if h == 12 and "昼前" in clean_text and "昼過ぎ" in clean_text and ("から" in clean_text or "のち" in clean_text):
                         return "☀"
-                    if h == 15 and "日中" in text:
+                    if h == 15 and "日中" in clean_text and "晴" in clean_text:
                         return "☀"
                         
                 return base_sym
@@ -347,7 +349,7 @@ jobs:
                             dt_parsed = datetime.fromisoformat(t_str).astimezone(jst)
                             if dt_parsed == target_dt and str(code).strip() != "":
                                 sym = code_to_symbol(str(code).strip(), current_slot_pop)
-                                # 【重要】気象庁コードが一律の時のために、テキスト解析による時間帯補正を挟む
+                                # テキスト解析による完全上書き処理を適用
                                 sym = correct_symbol_by_time_text(sym, weather_text, target_hour_str)
                                 history_data[cache_key] = sym  
                                 return sym, current_slot_pop
@@ -434,7 +436,7 @@ jobs:
         run: |
           python -c "$PYTHON_SCRIPT"
 
-      # 3. キャッシュの保存（v20にアップデート）
+      # 3. キャッシュの保存（v21にアップデート）
       - name: Save Run Hour and Temp Cache
         uses: actions/cache/save@v4
         if: success()
@@ -442,4 +444,4 @@ jobs:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v20-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: weather-v2-cache-v21-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
