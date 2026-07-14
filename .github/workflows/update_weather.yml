@@ -83,7 +83,13 @@ jobs:
                     if not (has_sun or has_cloud or has_snow):
                         has_cloud = True
 
-                is_change = "のち" in raw_text or "後、" in raw_text or ("後" in raw_text and not any(x in raw_text for x in ["午後", "午前", "夜後"]))
+                # 【修正ポイント】「のち」がなくても時間帯を挟んで天気が変わるパターンに対応
+                has_change_word = "のち" in raw_text or "後、" in raw_text or ("後" in raw_text and not any(x in raw_text for x in ["午後", "午前", "夜後"]))
+                time_keywords = ["朝", "昼", "夕方", "夜", "午後", "午前", "日中"]
+                has_time_word = any(tk in raw_text for tk in time_keywords)
+                weather_count = sum([has_sun, has_cloud, has_rain, has_snow])
+
+                is_change = has_change_word or (has_time_word and weather_count >= 2)
                 symbols = []
 
                 if is_change:
@@ -95,10 +101,14 @@ jobs:
                         elif char == "曇" and not first_sym: first_sym = "☁"
                         elif char == "雨" and has_rain and not first_sym: first_sym = "☔"
                         elif char in ["雪", "霰", "霙"] and not first_sym: first_sym = "☃"
-                        if char in ["の", "後"]:
+                        if char in ["の", "後", "朝", "昼", "夕", "夜"]:
                             break
                             
-                    idx = raw_text.find("のち") if "のち" in raw_text else raw_text.find("後")
+                    idx = -1
+                    for delimiter in ["のち", "後", "朝", "昼", "夕", "夜"]:
+                        if delimiter in raw_text:
+                            idx = raw_text.find(delimiter)
+                            break
                     if idx != -1:
                         sub_text = raw_text[idx:]
                         if "晴" in sub_text: second_sym = "☀"
@@ -178,20 +188,21 @@ jobs:
                 if not text: return base_sym
                 h = int(hour_str)
                 
-                # 「昼過ぎから夕方 雨」などのパターン抽出用に正規化
                 clean_text = text.replace(" ", "").replace("\u3000", "")
                 
+                # 「夜 雨」など、日中降らないことが確定している場合のクレンジング
+                if "夜" in clean_text and "雨" in clean_text and not any(x in clean_text for x in ["昼", "日中", "午前", "午後"]):
+                    if h in [6, 9, 12, 15, 18]:
+                        return "☁"
+
                 if "雨" in clean_text:
-                    # 12時は「昼過ぎから」であれば、12:00時点ではまだくもり
                     if h == 12 and "昼過ぎ" in clean_text and ("から" in clean_text or "後" in clean_text) and "昼前" not in clean_text:
                         return "☁"
-                    # 15時、18時は「昼過ぎから夕方」「夕方から」などの雨ターゲットゾーンに直撃するため、ベースを「☔」単体に完全上書き
                     if h in [15, 18]:
                         if any(x in clean_text for x in ["昼過ぎ", "夕方", "日中", "午後"]):
                             return "☔"
                             
                 if "晴" in clean_text:
-                    # 「昼前から昼過ぎ晴れ」などの指定で12時に完全に該当する場合、晴れに上書き
                     if h == 12 and "昼前" in clean_text and "昼過ぎ" in clean_text and ("から" in clean_text or "のち" in clean_text):
                         return "☀"
                     if h == 15 and "日中" in clean_text and "晴" in clean_text:
@@ -264,7 +275,7 @@ jobs:
 
                 day_pops = []
                 for t_str, pop in zip(pop_times, hourly_pops):
-                    dt_parsed = datetime.fromisoformat(t_str).astimezone(jst)
+                    dt_parsed = datetime.fromisoformat(t_str.replace("Z", "+00:00")).astimezone(jst)
                     if dt_parsed.strftime("%Y-%m-%d") == target_date_str and str(pop).strip() != "":
                         day_pops.append(int(pop))
                 max_prob = max(day_pops) if day_pops else 0
@@ -335,8 +346,12 @@ jobs:
 
                     if hourly_pops and pop_times:
                         for t_str, pop in zip(pop_times, hourly_pops):
-                            dt_parsed = datetime.fromisoformat(t_str).astimezone(jst)
-                            if dt_parsed == target_dt and str(pop).strip() != "":
+                            dt_parsed = datetime.fromisoformat(t_str.replace("Z", "+00:00")).astimezone(jst)
+                            # 【修正ポイント】年、月、日、時間が完全一致するか厳密にマッチング
+                            if (dt_parsed.year == target_dt.year and 
+                                dt_parsed.month == target_dt.month and 
+                                dt_parsed.day == target_dt.day and 
+                                dt_parsed.hour == target_dt.hour and str(pop).strip() != ""):
                                 current_slot_pop = int(pop)
                                 history_data[pop_cache_key] = current_slot_pop
                                 break
@@ -346,10 +361,13 @@ jobs:
 
                     if hourly_weather_codes and weather_times:
                         for t_str, code in zip(weather_times, hourly_weather_codes):
-                            dt_parsed = datetime.fromisoformat(t_str).astimezone(jst)
-                            if dt_parsed == target_dt and str(code).strip() != "":
+                            dt_parsed = datetime.fromisoformat(t_str.replace("Z", "+00:00")).astimezone(jst)
+                            # 【修正ポイント】年、月、日、時間が完全一致するか厳密にマッチング
+                            if (dt_parsed.year == target_dt.year and 
+                                dt_parsed.month == target_dt.month and 
+                                dt_parsed.day == target_dt.day and 
+                                dt_parsed.hour == target_dt.hour and str(code).strip() != ""):
                                 sym = code_to_symbol(str(code).strip(), current_slot_pop)
-                                # テキスト解析による完全上書き処理を適用
                                 sym = correct_symbol_by_time_text(sym, weather_text, target_hour_str)
                                 history_data[cache_key] = sym  
                                 return sym, current_slot_pop
@@ -401,7 +419,6 @@ jobs:
                 print("--- 送信データ内容ログ ---")
                 print(f"Title : {title_text}")
                 print(f"Message:\n{weather_message}")
-                print("---------------------------------------------------------")
 
                 headers = {
                     "Authorization": f"Bearer {API_KEY}",
