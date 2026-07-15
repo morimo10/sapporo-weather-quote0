@@ -44,13 +44,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      # 2. メイン処理の実行（run: | で直接Pythonスクリプトをマルチライン実行）
+      # 2. Pythonスクリプトをファイルに書き出して安全に実行（クォーテーション競合を完全回避）
       - name: Generate and Push to Dot API
         env:
           QUOTE0_API_KEY: ${{ secrets.QUOTE0_API_KEY }}
           QUOTE0_DEVICE_ID: ${{ secrets.QUOTE0_DEVICE_ID }}
         run: |
-          python -c '
+          cat << 'EOF' > update_weather.py
           import os
           import json
           import sys
@@ -416,6 +416,7 @@ jobs:
               print(f"Title : {title_text}")
               print("Message:")
               print(message_text)
+              
               response = requests.post(DOT_API_URL, headers=headers, json=payload, timeout=15)
               if response.status_code == 200:
                   print("APIへの送信に成功しました。")
@@ -429,7 +430,8 @@ jobs:
           except Exception as e:
               print(f"予期しないエラーが発生しました: {e}")
               sys.exit(1)
-          '
+          EOF
+          python update_weather.py
 
       # 3. キャッシュを確実にGitHub Actions側に新規保存(Save)する
       - name: Save Run Hour and Temp Cache
