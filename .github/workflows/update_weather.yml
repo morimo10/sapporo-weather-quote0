@@ -339,6 +339,7 @@ jobs:
               if is_tomorrow_data and today_date_str not in history_data:
                   if len(temps) >= 4: history_data[today_date_str] = int(temps[1])
 
+             # --- 修正後の find_hourly_data 関数 ---
               def find_hourly_data(target_hour_str):
                   current_slot_pop = max_prob
                   cache_key = f"sym-{target_date_str}-{target_hour_str}"
@@ -347,9 +348,7 @@ jobs:
                   base_dt = now + timedelta(days=1) if is_tomorrow_data else now
                   target_dt = base_dt.replace(hour=int(target_hour_str), minute=0, second=0, microsecond=0)
 
-                  print(f"\n===== [DEBUG] {target_hour_str}:00 の時間データ検索開始 =====")
-                  print(f"探している日時: {target_dt.strftime('%Y-%m-%d %H:%M:%S JST')}")
-
+                  # 降水確率 (pops) の検索
                   if hourly_pops and pop_times:
                       for t_str, pop in zip(pop_times, hourly_pops):
                           dt_parsed = datetime.fromisoformat(t_str.replace("Z", "+00:00")).astimezone(jst)
@@ -364,14 +363,14 @@ jobs:
                           if pop_cache_key in history_data:
                               current_slot_pop = history_data[pop_cache_key]
 
+                  # 天気コードキーの修正 (weatherCode -> weatherCodes もしくは weatherCode)
+                  # 気象庁データのキー揺れに対応するため、両方のキー名で取得を試みます
+                  target_codes = sapporo_hourly.get('weatherCodes', sapporo_hourly.get('weatherCode', []))
+
                   found_data = False
-                  if hourly_weather_codes and weather_times:
-                      print(f"気象庁データ内の候補数: {len(weather_times)}件")
-                      for t_str, code in zip(weather_times, hourly_weather_codes):
+                  if target_codes and weather_times:
+                      for t_str, code in zip(weather_times, target_codes):
                           dt_parsed = datetime.fromisoformat(t_str.replace("Z", "+00:00")).astimezone(jst)
-                          
-                          # 候補になっている日時とコードを1件ずつログに出力
-                          print(f"  └ 比較対象: {dt_parsed.strftime('%Y-%m-%d %H:%M:%S JST')} | コード: {code}")
                           
                           if (dt_parsed.year == target_dt.year and 
                               dt_parsed.month == target_dt.month and 
@@ -380,17 +379,32 @@ jobs:
                               sym = code_to_symbol(str(code).strip(), current_slot_pop)
                               sym = correct_symbol_by_time_text(sym, weather_text, target_hour_str)
                               history_data[cache_key] = sym  
-                              print(f"  👉 一致しました！採用記号: {sym}")
                               found_data = True
                               return sym, current_slot_pop
 
-                  if not found_data:
-                      print("  ❌ 一致する時間データがなかったため、フォールバック（代替え）処理を行います。")
-
+                  # キャッシュ（過去の保存データ）があればそれを使用
                   if cache_key in history_data:
                       return history_data[cache_key], current_slot_pop
                           
+                  # データが気象庁から取得できなかった場合の賢い予測フォールバック
                   fallback_sym = get_advanced_weather_symbol(weather_text, current_slot_pop)
+                  
+                  # 天気の切り替わり「→」がある場合のみ、時間帯別で切り分ける
+                  if "→" in fallback_sym:
+                      parts = fallback_sym.split("→")
+                      h_val = int(target_hour_str)
+                      
+                      if "夜" in weather_text or "遅く" in weather_text:
+                          fallback_sym = parts[0] if h_val < 18 else parts[1]
+                      elif "夕方" in weather_text:
+                          fallback_sym = parts[0] if h_val < 15 else parts[1]
+                      elif "午後" in weather_text:
+                          fallback_sym = parts[0] if h_val < 12 else parts[1]
+                      elif "昼頃" in weather_text or "日中" in weather_text:
+                          fallback_sym = parts[0] if h_val < 9 else parts[1]
+                      else:
+                          fallback_sym = parts[0] if h_val < 12 else parts[1]
+
                   fallback_sym = correct_symbol_by_time_text(fallback_sym, weather_text, target_hour_str)
                   return fallback_sym, current_slot_pop
 
