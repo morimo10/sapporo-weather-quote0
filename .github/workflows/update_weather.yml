@@ -30,9 +30,9 @@ jobs:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v22-${{ github.run_id }}
+          key: weather-v2-cache-v23-${{ github.run_id }}
           restore-keys: |
-            weather-v2-cache-v22-
+            weather-v2-cache-v23-
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -219,10 +219,20 @@ jobs:
                   print(f"気象庁サーバーへの接続または名前解決に失敗しました: {e}")
                   sys.exit(0)
 
-              # キーの表記ブレ（weatherCodes と weatherCode）に対応
+              # 時系列オブジェクトの抽出を安全に強化
               hourly_series = res[0]['timeSeries'][1]
               hourly_times_root = hourly_series['timeDefines'] 
-              sapporo_hourly = next((a for a in hourly_series['areas'] if a['area']['code'] == '016010'), hourly_series['areas'][0])
+              
+              # 石狩・札幌に該当するエリアデータを広域一致も含めてより柔軟に探索
+              sapporo_hourly = None
+              for a in hourly_series['areas']:
+                  code_str = str(a['area']['code'])
+                  if code_str.startswith("0160") or a['area']['name'] in ["石狩地方", "石狩空知後志地方"]:
+                      if 'weatherCodes' in a or 'weatherCode' in a or 'pops' in a:
+                          sapporo_hourly = a
+                          break
+              if not sapporo_hourly:
+                  sapporo_hourly = hourly_series['areas'][0]
               
               hourly_weather_codes = sapporo_hourly.get('weatherCodes', sapporo_hourly.get('weatherCode', []))
               hourly_pops = sapporo_hourly.get('pops', [])
@@ -230,6 +240,7 @@ jobs:
               # --- デバッグ用：生データログを出力 ---
               print("================ [JMA RAW DATA LOG] ================")
               try:
+                  print(f"【対象エリア名】: {sapporo_hourly['area']['name']} ({sapporo_hourly['area']['code']})")
                   print(f"【札幌管区の生テキスト配列】: {res[0]['timeSeries'][0]['areas'][0].get('weathers', [])}")
                   print("\n【時系列予報（3時間ごと）の生データ】:")
                   for i, t_str in enumerate(hourly_times_root):
@@ -264,7 +275,7 @@ jobs:
 
               base_series = res[0]['timeSeries'][0]
               weather_areas = base_series['areas']
-              sapporo_weather = next((a for a in weather_areas if a['area']['code'] == '016010'), weather_areas[0])
+              sapporo_weather = next((a for a in weather_areas if str(a['area']['code']).startswith("0160")), weather_areas[0])
 
               target_index = 1 if is_tomorrow_data else 0
               weather_text = sapporo_weather['weathers'][target_index] if len(sapporo_weather['weathers']) > target_index else sapporo_weather['weathers'][0]
@@ -289,7 +300,7 @@ jobs:
 
               temp_series = res[0]['timeSeries'][2]
               temp_areas = temp_series['areas']
-              sapporo_temp = next((a for a in temp_areas if a['area']['code'] == '016010'), temp_areas[0])
+              sapporo_temp = next((a for a in temp_areas if str(a['area']['code']).startswith("0160")), temp_areas[0])
               temps = sapporo_temp['temps']
               tmin_raw = temps[2] if is_tomorrow_data and len(temps) >= 4 else (temps[0] if len(temps) > 0 else "14")
               tmax_raw = temps[3] if is_tomorrow_data and len(temps) >= 4 else (temps[1] if len(temps) > 1 else "25")
@@ -432,7 +443,6 @@ jobs:
               print("Message:")
               print(message_text)
               
-              # APIサーバー側の502エラー対策：最大3回リトライする
               for attempt in range(3):
                   try:
                       response = requests.post(DOT_API_URL, headers=headers, json=payload, timeout=15)
@@ -469,4 +479,4 @@ jobs:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v22-${{ github.run_id }}
+          key: weather-v2-cache-v23-${{ github.run_id }}
