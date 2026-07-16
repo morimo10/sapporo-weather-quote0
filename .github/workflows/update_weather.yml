@@ -409,8 +409,15 @@ jobs:
 
               message_text = "\n".join(forecast_lines)
 
-              headers = {"X-API-KEY": API_KEY, "Content-Type": "application/json"}
-              payload = {"title": title_text, "message": message_text}
+              headers = {
+                  "Authorization": f"Bearer {API_KEY}",
+                  "Content-Type": "application/json"
+              }
+              payload = {
+                  "refreshNow": True,
+                  "title": title_text,
+                  "message": message_text
+              }
               
               print("--- 送信データ内容ログ ---")
               print(f"Title : {title_text}")
