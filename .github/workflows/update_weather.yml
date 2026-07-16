@@ -30,9 +30,9 @@ jobs:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v21-${{ github.run_id }}
+          key: weather-v2-cache-v22-${{ github.run_id }}
           restore-keys: |
-            weather-v2-cache-v21-
+            weather-v2-cache-v22-
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -54,6 +54,7 @@ jobs:
           import os
           import json
           import sys
+          import time
           import requests
           from datetime import datetime, timedelta, timezone
 
@@ -188,22 +189,18 @@ jobs:
           def correct_symbol_by_time_text(base_sym, text, hour_str):
               if not text: return base_sym
               h = int(hour_str)
-              
               clean_text = text.replace(" ", "").replace("\u3000", "")
               
               if "雨" in clean_text:
-                  if "夕方" in clean_text and "から" in clean_text:
-                      if h < 15 and "☔" in base_sym:
-                          return base_sym.replace("☔", "☁")
-                  if "夜" in clean_text and "から" in clean_text:
-                      if h < 18 and "☔" in base_sym:
-                          return base_sym.replace("☔", "☁")
+                  if "夕方" in clean_text and "から" in clean_text and h < 15 and "☔" in base_sym:
+                      return base_sym.replace("☔", "☁")
+                  if "夜" in clean_text and "から" in clean_text and h < 18 and "☔" in base_sym:
+                      return base_sym.replace("☔", "☁")
 
               if "晴" in clean_text and "後" in clean_text:
                   idx = clean_text.find("後")
                   if idx != -1 and "曇" in clean_text[idx:] and h >= 15:
                       return "☁"
-
               return base_sym
 
           try:
@@ -222,7 +219,7 @@ jobs:
                   print(f"気象庁サーバーへの接続または名前解決に失敗しました: {e}")
                   sys.exit(0)
 
-              # 札幌管区の時系列生データを抽出
+              # キーの表記ブレ（weatherCodes と weatherCode）に対応
               hourly_series = res[0]['timeSeries'][1]
               hourly_times_root = hourly_series['timeDefines'] 
               sapporo_hourly = next((a for a in hourly_series['areas'] if a['area']['code'] == '016010'), hourly_series['areas'][0])
@@ -230,7 +227,7 @@ jobs:
               hourly_weather_codes = sapporo_hourly.get('weatherCodes', sapporo_hourly.get('weatherCode', []))
               hourly_pops = sapporo_hourly.get('pops', [])
 
-              # --- デバッグ用：時系列データの詳細ログを出力 ---
+              # --- デバッグ用：生データログを出力 ---
               print("================ [JMA RAW DATA LOG] ================")
               try:
                   print(f"【札幌管区の生テキスト配列】: {res[0]['timeSeries'][0]['areas'][0].get('weathers', [])}")
@@ -270,10 +267,7 @@ jobs:
               sapporo_weather = next((a for a in weather_areas if a['area']['code'] == '016010'), weather_areas[0])
 
               target_index = 1 if is_tomorrow_data else 0
-              if len(sapporo_weather['weathers']) > target_index:
-                  weather_text = sapporo_weather['weathers'][target_index]
-              else:
-                  weather_text = sapporo_weather['weathers'][0]
+              weather_text = sapporo_weather['weathers'][target_index] if len(sapporo_weather['weathers']) > target_index else sapporo_weather['weathers'][0]
 
               weather_times = hourly_times_root[-len(hourly_weather_codes):] if hourly_weather_codes else []
               pop_times = hourly_times_root[-len(hourly_pops):] if hourly_pops else []
@@ -366,12 +360,9 @@ jobs:
                           if pop_cache_key in history_data:
                               current_slot_pop = history_data[pop_cache_key]
 
-                  target_codes = sapporo_hourly.get('weatherCodes', sapporo_hourly.get('weatherCode', []))
-
-                  if target_codes and weather_times:
-                      for t_str, code in zip(weather_times, target_codes):
+                  if hourly_weather_codes and weather_times:
+                      for t_str, code in zip(weather_times, hourly_weather_codes):
                           dt_parsed = datetime.fromisoformat(t_str.replace("Z", "+00:00")).astimezone(jst)
-                          
                           if (dt_parsed.year == target_dt.year and 
                               dt_parsed.month == target_dt.month and 
                               dt_parsed.day == target_dt.day and 
@@ -385,21 +376,14 @@ jobs:
                       return history_data[cache_key], current_slot_pop
                           
                   fallback_sym = get_advanced_weather_symbol(weather_text, current_slot_pop)
-                  
                   if "→" in fallback_sym:
                       parts = fallback_sym.split("→")
                       h_val = int(target_hour_str)
-                      
-                      if "夜" in weather_text or "遅く" in weather_text:
-                          fallback_sym = parts[0] if h_val < 18 else parts[1]
-                      elif "夕方" in weather_text:
-                          fallback_sym = parts[0] if h_val < 15 else parts[1]
-                      elif "午後" in weather_text:
-                          fallback_sym = parts[0] if h_val < 12 else parts[1]
-                      elif "昼頃" in weather_text or "日中" in weather_text:
-                          fallback_sym = parts[0] if h_val < 9 else parts[1]
-                      else:
-                          fallback_sym = parts[0] if h_val < 12 else parts[1]
+                      if "夜" in weather_text or "遅く" in weather_text: fallback_sym = parts[0] if h_val < 18 else parts[1]
+                      elif "夕方" in weather_text: fallback_sym = parts[0] if h_val < 15 else parts[1]
+                      elif "午後" in weather_text: fallback_sym = parts[0] if h_val < 12 else parts[1]
+                      elif "昼頃" in weather_text or "日中" in weather_text: fallback_sym = parts[0] if h_val < 9 else parts[1]
+                      else: fallback_sym = parts[0] if h_val < 12 else parts[1]
 
                   fallback_sym = correct_symbol_by_time_text(fallback_sym, weather_text, target_hour_str)
                   return fallback_sym, current_slot_pop
@@ -448,15 +432,28 @@ jobs:
               print("Message:")
               print(message_text)
               
-              response = requests.post(DOT_API_URL, headers=headers, json=payload, timeout=15)
-              if response.status_code == 200:
-                  print("APIへの送信に成功しました。")
-                  with open(cache_file, "w") as f:
-                      f.write(current_hour_str)
-                  with open(history_file, "w") as f:
-                      json.dump(history_data, f, ensure_ascii=False, indent=2)
+              # APIサーバー側の502エラー対策：最大3回リトライする
+              for attempt in range(3):
+                  try:
+                      response = requests.post(DOT_API_URL, headers=headers, json=payload, timeout=15)
+                      if response.status_code == 200:
+                          print("APIへの送信に成功しました。")
+                          with open(cache_file, "w") as f:
+                              f.write(current_hour_str)
+                          with open(history_file, "w") as f:
+                              json.dump(history_data, f, ensure_ascii=False, indent=2)
+                          break
+                      elif response.status_code == 502:
+                          print(f"APIサーバーが 502 Bad Gateway を返しました。リトライします... ({attempt + 1}/3)")
+                          time.sleep(3)
+                      else:
+                          print(f"APIエラー: {response.status_code} - {response.text}")
+                          break
+                  except requests.exceptions.RequestException as req_err:
+                      print(f"通信エラーが発生しました: {req_err}. リトライします... ({attempt + 1}/3)")
+                      time.sleep(3)
               else:
-                  print(f"APIエラー: {response.status_code} - {response.text}")
+                  print("複数回リトライしましたが、API送信に失敗しました。サーバーの復旧を待ちます。")
 
           except Exception as e:
               print(f"予期しないエラーが発生しました: {e}")
@@ -472,4 +469,4 @@ jobs:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v21-${{ github.run_id }}
+          key: weather-v2-cache-v22-${{ github.run_id }}
