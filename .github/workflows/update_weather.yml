@@ -411,11 +411,12 @@ jobs:
 
               headers = {"X-API-KEY": API_KEY, "Content-Type": "application/json"}
               payload = {"title": title_text, "message": message_text}
-              
+
               print("--- 送信データ内容ログ ---")
               print(f"Title : {title_text}")
               print("Message:")
-              print(message_text)
+              print(message_text)  # 👈 左端を他のprintと完全に揃えます
+
               
               response = requests.post(DOT_API_URL, headers=headers, json=payload, timeout=15)
               if response.status_code == 200:
