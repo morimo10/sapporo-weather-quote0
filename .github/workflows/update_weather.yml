@@ -260,7 +260,24 @@ jobs:
               base_series = res[0]['timeSeries'][0]
               weather_areas = base_series['areas']
               sapporo_weather = next((a for a in weather_areas if a['area']['code'] == '016010'), weather_areas[0])
-              weather_text = sapporo_weather['weathers'][day_idx]
+
+              # --- [修正前] ---
+              # weather_text = sapporo_weather['weathers'][day_idx]
+              
+              # --- [修正後] インデックスの参照ズレを確実に解消するコード ---
+              # 明日モード(is_tomorrow_data=True)ならインデックス1(明日)、そうでなければ0(今日)
+              target_index = 1 if is_tomorrow_data else 0
+              
+              # 安全のために配列の長さを超えないかチェックした上で取得
+              if len(sapporo_weather['weathers']) > target_index:
+                  weather_text = sapporo_weather['weathers'][target_index]
+              else:
+                  weather_text = sapporo_weather['weathers'][0]
+                  
+              # タイトルに使う代表天気マークも、この正しい weather_text から直接生成する
+              title_weather_sym = get_advanced_weather_symbol(weather_text, max_prob)
+
+              
 
               hourly_series = res[0]['timeSeries'][1]
               hourly_times_root = hourly_series['timeDefines'] 
