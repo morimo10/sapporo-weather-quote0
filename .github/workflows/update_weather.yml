@@ -226,6 +226,35 @@ jobs:
                   print(f"気象庁サーバーへの接続または名前解決に失敗しました: {e}")
                   sys.exit(0)
 
+                                # --- デバッグ用の変数とログ ---
+                  print(f"\n===== [DEBUG] {target_hour_str}:00 の時間データ検索開始 =====")
+                  print(f"探している日時: {target_dt.strftime('%Y-%m-%d %H:%M:%S JST')}")
+                  
+                  found_data = False
+                  if hourly_weather_codes and weather_times:
+                      print(f"気象庁データ内の候補数: {len(weather_times)}件")
+                      
+                      for t_str, code in zip(weather_times, hourly_weather_codes):
+                          dt_parsed = datetime.fromisoformat(t_str.replace("Z", "+00:00")).astimezone(jst)
+                          
+                          # 候補日時と探している日時の比較ログ
+                          print(f"  └ 比較対象: {dt_parsed.strftime('%Y-%m-%d %H:%M:%S JST')} | コード: {code}")
+                          
+                          if (dt_parsed.year == target_dt.year and 
+                              dt_parsed.month == target_dt.month and 
+                              dt_parsed.day == target_dt.day and 
+                              dt_parsed.hour == target_dt.hour and str(code).strip() != ""):
+                              
+                              sym = code_to_symbol(str(code).strip(), current_slot_pop)
+                              print(f"  👉 一致しました！ 採用記号: {sym}")
+                              found_data = True
+                              # ... (以下、元のマッチした時の処理)
+                              
+                  if not found_data:
+                      print(f"  ❌ 一致する時間がなかったため、フォールバック（代替え）処理に移行します。")
+                  print(f"==================================================\n")
+    
+
               print("================ [JMA RAW DATA LOG] ================")
               try:
                   print(f"【生データ全体 (エリア情報)】:\n{json.dumps(res[0]['timeSeries'][0]['areas'], ensure_ascii=False, indent=2)}")
