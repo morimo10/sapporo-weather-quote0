@@ -44,7 +44,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      # 2. Pythonスクリプトをファイルに書き出して安全に実行（クォーテーション競合を完全回避）
+      # 2. Pythonスクリプトを実行
       - name: Generate and Push to Dot API
         env:
           QUOTE0_API_KEY: ${{ secrets.QUOTE0_API_KEY }}
@@ -191,23 +191,19 @@ jobs:
               
               clean_text = text.replace(" ", "").replace("\u3000", "")
               
-              if "夜" in clean_text and "雨" in clean_text and not any(x in clean_text for x in ["昼", "日中", "午前", "午後"]):
-                  if h in [6, 9, 12, 15, 18]:
+              if "雨" in clean_text:
+                  if "夕方" in clean_text and "から" in clean_text:
+                      if h < 15 and "☔" in base_sym:
+                          return base_sym.replace("☔", "☁")
+                  if "夜" in clean_text and "から" in clean_text:
+                      if h < 18 and "☔" in base_sym:
+                          return base_sym.replace("☔", "☁")
+
+              if "晴" in clean_text and "後" in clean_text:
+                  idx = clean_text.find("後")
+                  if idx != -1 and "曇" in clean_text[idx:] and h >= 15:
                       return "☁"
 
-              if "雨" in clean_text:
-                  if h == 12 and "昼過ぎ" in clean_text and ("から" in clean_text or "後" in clean_text) and "昼前" not in clean_text:
-                      return "☁"
-                  if h in [15, 18]:
-                      if any(x in clean_text for x in ["昼過ぎ", "夕方", "日中", "午後"]):
-                          return "☔"
-                          
-              if "晴" in clean_text:
-                  if h == 12 and "昼前" in clean_text and "昼過ぎ" in clean_text and ("から" in clean_text or "のち" in clean_text):
-                      return "☀"
-                  if h == 15 and "日中" in clean_text and "晴" in clean_text:
-                      return "☀"
-                      
               return base_sym
 
           try:
@@ -226,12 +222,24 @@ jobs:
                   print(f"気象庁サーバーへの接続または名前解決に失敗しました: {e}")
                   sys.exit(0)
 
+              # 札幌管区の時系列生データを抽出
+              hourly_series = res[0]['timeSeries'][1]
+              hourly_times_root = hourly_series['timeDefines'] 
+              sapporo_hourly = next((a for a in hourly_series['areas'] if a['area']['code'] == '016010'), hourly_series['areas'][0])
+              
+              hourly_weather_codes = sapporo_hourly.get('weatherCodes', sapporo_hourly.get('weatherCode', []))
+              hourly_pops = sapporo_hourly.get('pops', [])
+
+              # --- デバッグ用：時系列データの詳細ログを出力 ---
               print("================ [JMA RAW DATA LOG] ================")
               try:
-                  print(f"【生データ全体 (エリア情報)】:\n{json.dumps(res[0]['timeSeries'][0]['areas'], ensure_ascii=False, indent=2)}")
-                  base_series_debug = res[0]['timeSeries'][0]
-                  sapporo_weather_debug = next((a for a in base_series_debug['areas'] if a['area']['code'] == '016010'), base_series_debug['areas'][0])
-                  print(f"【札幌管区の生テキスト配列】: {sapporo_weather_debug.get('weathers', [])}")
+                  print(f"【札幌管区の生テキスト配列】: {res[0]['timeSeries'][0]['areas'][0].get('weathers', [])}")
+                  print("\n【時系列予報（3時間ごと）の生データ】:")
+                  for i, t_str in enumerate(hourly_times_root):
+                      dt = datetime.fromisoformat(t_str.replace("Z", "+00:00")).astimezone(jst)
+                      code = hourly_weather_codes[i] if i < len(hourly_weather_codes) else "N/A"
+                      pop = hourly_pops[i] if i < len(hourly_pops) else "N/A"
+                      print(f"  - 時刻: {dt.strftime('%Y-%m-%d %H:%M')} | 天気コード: {code} | 降水確率: {pop}%")
               except Exception as log_err:
                   print(f"ログ出力中にエラーが発生しました: {log_err}")
               print("====================================================")
@@ -261,20 +269,11 @@ jobs:
               weather_areas = base_series['areas']
               sapporo_weather = next((a for a in weather_areas if a['area']['code'] == '016010'), weather_areas[0])
 
-              # --- [修正箇所] 明日のテキスト（weathers[1]）を確実に取得する安全なロジック ---
               target_index = 1 if is_tomorrow_data else 0
               if len(sapporo_weather['weathers']) > target_index:
                   weather_text = sapporo_weather['weathers'][target_index]
               else:
                   weather_text = sapporo_weather['weathers'][0]
-
-              hourly_series = res[0]['timeSeries'][1]
-              hourly_times_root = hourly_series['timeDefines'] 
-              hourly_areas = hourly_series['areas']
-              sapporo_hourly = next((a for a in hourly_areas if a['area']['code'] == '016010'), hourly_areas[0])
-              
-              hourly_weather_codes = sapporo_hourly.get('weatherCode', [])
-              hourly_pops = sapporo_hourly.get('pops', [])
 
               weather_times = hourly_times_root[-len(hourly_weather_codes):] if hourly_weather_codes else []
               pop_times = hourly_times_root[-len(hourly_pops):] if hourly_pops else []
@@ -287,7 +286,6 @@ jobs:
                           continue
                       day_pops.append(int(pop))
               
-              # --- [重要：定義順の整理] max_prob と day_symbol をここで安全に生成する ---
               max_prob = max(day_pops) if day_pops else 0
               prob_str = f"{max_prob}%"
               umbrella_mark = "☔" if max_prob >= 50 else ("☂" if max_prob >= 30 else "")
@@ -346,7 +344,6 @@ jobs:
               if is_tomorrow_data and today_date_str not in history_data:
                   if len(temps) >= 4: history_data[today_date_str] = int(temps[1])
 
-              # --- 修正後の find_hourly_data 関数 ---
               def find_hourly_data(target_hour_str):
                   current_slot_pop = max_prob
                   cache_key = f"sym-{target_date_str}-{target_hour_str}"
@@ -355,7 +352,6 @@ jobs:
                   base_dt = now + timedelta(days=1) if is_tomorrow_data else now
                   target_dt = base_dt.replace(hour=int(target_hour_str), minute=0, second=0, microsecond=0)
 
-                  # 降水確率 (pops) の検索
                   if hourly_pops and pop_times:
                       for t_str, pop in zip(pop_times, hourly_pops):
                           dt_parsed = datetime.fromisoformat(t_str.replace("Z", "+00:00")).astimezone(jst)
@@ -370,10 +366,8 @@ jobs:
                           if pop_cache_key in history_data:
                               current_slot_pop = history_data[pop_cache_key]
 
-                  # 天気コードキーの修正 (weatherCode -> weatherCodes もしくは weatherCode)
                   target_codes = sapporo_hourly.get('weatherCodes', sapporo_hourly.get('weatherCode', []))
 
-                  found_data = False
                   if target_codes and weather_times:
                       for t_str, code in zip(weather_times, target_codes):
                           dt_parsed = datetime.fromisoformat(t_str.replace("Z", "+00:00")).astimezone(jst)
@@ -385,17 +379,13 @@ jobs:
                               sym = code_to_symbol(str(code).strip(), current_slot_pop)
                               sym = correct_symbol_by_time_text(sym, weather_text, target_hour_str)
                               history_data[cache_key] = sym  
-                              found_data = True
                               return sym, current_slot_pop
 
-                  # キャッシュ（過去の保存データ）があればそれを使用
                   if cache_key in history_data:
                       return history_data[cache_key], current_slot_pop
                           
-                  # データが気象庁から取得できなかった場合の賢い予測フォールバック
                   fallback_sym = get_advanced_weather_symbol(weather_text, current_slot_pop)
                   
-                  # 天気の切り替わり「→」がある場合のみ、時間帯別で切り分ける
                   if "→" in fallback_sym:
                       parts = fallback_sym.split("→")
                       h_val = int(target_hour_str)
@@ -474,7 +464,7 @@ jobs:
           EOF
           python update_weather.py
 
-      # 3. キャッシュを確実にGitHub Actions側に新規保存(Save)する
+      # 3. キャッシュを確実に保存
       - name: Save Run Hour and Temp Cache
         uses: actions/cache/save@v4
         if: always()
