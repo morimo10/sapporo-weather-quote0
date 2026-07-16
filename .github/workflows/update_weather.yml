@@ -261,23 +261,12 @@ jobs:
               weather_areas = base_series['areas']
               sapporo_weather = next((a for a in weather_areas if a['area']['code'] == '016010'), weather_areas[0])
 
-              # --- [修正前] ---
-              # weather_text = sapporo_weather['weathers'][day_idx]
-              
-              # --- [修正後] インデックスの参照ズレを確実に解消するコード ---
-              # 明日モード(is_tomorrow_data=True)ならインデックス1(明日)、そうでなければ0(今日)
+              # --- [修正箇所] 明日のテキスト（weathers[1]）を確実に取得する安全なロジック ---
               target_index = 1 if is_tomorrow_data else 0
-              
-              # 安全のために配列の長さを超えないかチェックした上で取得
               if len(sapporo_weather['weathers']) > target_index:
                   weather_text = sapporo_weather['weathers'][target_index]
               else:
                   weather_text = sapporo_weather['weathers'][0]
-                  
-              # タイトルに使う代表天気マークも、この正しい weather_text から直接生成する
-              title_weather_sym = get_advanced_weather_symbol(weather_text, max_prob)
-
-              
 
               hourly_series = res[0]['timeSeries'][1]
               hourly_times_root = hourly_series['timeDefines'] 
@@ -298,6 +287,7 @@ jobs:
                           continue
                       day_pops.append(int(pop))
               
+              # --- [重要：定義順の整理] max_prob と day_symbol をここで安全に生成する ---
               max_prob = max(day_pops) if day_pops else 0
               prob_str = f"{max_prob}%"
               umbrella_mark = "☔" if max_prob >= 50 else ("☂" if max_prob >= 30 else "")
@@ -356,7 +346,7 @@ jobs:
               if is_tomorrow_data and today_date_str not in history_data:
                   if len(temps) >= 4: history_data[today_date_str] = int(temps[1])
 
-             # --- 修正後の find_hourly_data 関数 ---
+              # --- 修正後の find_hourly_data 関数 ---
               def find_hourly_data(target_hour_str):
                   current_slot_pop = max_prob
                   cache_key = f"sym-{target_date_str}-{target_hour_str}"
@@ -381,7 +371,6 @@ jobs:
                               current_slot_pop = history_data[pop_cache_key]
 
                   # 天気コードキーの修正 (weatherCode -> weatherCodes もしくは weatherCode)
-                  # 気象庁データのキー揺れに対応するため、両方のキー名で取得を試みます
                   target_codes = sapporo_hourly.get('weatherCodes', sapporo_hourly.get('weatherCode', []))
 
                   found_data = False
