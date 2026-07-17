@@ -30,9 +30,9 @@ jobs:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v27-${{ github.run_id }}
+          key: weather-v2-cache-v28-${{ github.run_id }}
           restore-keys: |
-            weather-v2-cache-v27-
+            weather-v2-cache-v28-
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -44,7 +44,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      # 2. Pythonスクリプトを実行（時系列データのマッピング時間を厳密に比較）
+      # 2. Pythonスクリプトを実行（JST時間の時間（時）を正確にキーにして同期）
       - name: Generate and Push to Dot API
         env:
           QUOTE0_API_KEY: ${{ secrets.QUOTE0_API_KEY }}
@@ -181,7 +181,7 @@ jobs:
 
               history_data[target_date_str] = t_max_num
 
-              # --- 2. 【地域時系列予報】ブロック (res[1]) から厳密に時間一致するデータのみを抽出 ---
+              # --- 2. 【地域時系列予報】ブロック (res[1]) からパース ---
               h_weather_map = {}
               h_temp_map = {}
               
@@ -195,12 +195,15 @@ jobs:
                               if "weatherCodes" in a:
                                   w_codes = a["weatherCodes"]
                                   for idx, t_str in enumerate(hourly_time_defines):
-                                      # 時刻文字列をパースし、日付＋時間の完全一致でマッピング
+                                      # 時系列のISO時間文字列を確実に日本時間に変換
+                                      # 気象庁の "2026-07-17T06:00:00+09:00" などの時間部分を完全同期
                                       dt_parsed = datetime.fromisoformat(t_str.replace("Z", "+00:00")).astimezone(jst)
+                                      
+                                      # 厳密にターゲット日付（今日または明日）と一致するデータのみ抽出
                                       if dt_parsed.strftime("%Y-%m-%d") == target_date_str and idx < len(w_codes):
-                                          # キーを 'HH' のみではなく 'YYYY-MM-DD-HH' で厳密に保持
-                                          key_str = dt_parsed.strftime("%Y-%m-%d-%H")
-                                          h_weather_map[key_str] = code_to_symbol(w_codes[idx])
+                                          # パースした時刻部分（2桁のゼロ埋め「09」「12」など）をキーに格納
+                                          hour_key = dt_parsed.strftime("%H")
+                                          h_weather_map[hour_key] = code_to_symbol(w_codes[idx])
                               
                               if "temps" in a:
                                   t_values = a["temps"]
@@ -208,12 +211,11 @@ jobs:
                                       dt_parsed = datetime.fromisoformat(t_str.replace("Z", "+00:00")).astimezone(jst)
                                       if dt_parsed.strftime("%Y-%m-%d") == target_date_str and idx < len(t_values):
                                           if str(t_values[idx]).strip() != "":
-                                              key_str = dt_parsed.strftime("%Y-%m-%d-%H")
-                                              h_temp_map[key_str] = int(t_values[idx])
+                                              hour_key = dt_parsed.strftime("%H")
+                                              h_temp_map[hour_key] = int(t_values[idx])
 
-              # タイトルアイコンの決定
-              main_key = f"{target_date_str}-12"
-              main_symbol = h_weather_map.get(main_key, code_to_symbol(sapporo_weather['weatherCodes'][target_index]))
+              # タイトルの代表天気は12時のものを使用（なければ府県予報から）
+              main_symbol = h_weather_map.get("12", code_to_symbol(sapporo_weather['weatherCodes'][target_index]))
               title_text = f"{label_head}札幌市中央区{main_symbol}"
 
               # 表示行の構築（直近最大4コマ）
@@ -231,18 +233,15 @@ jobs:
                   target_dt = base_dt.replace(hour=int(hour_val), minute=0, second=0, microsecond=0)
                   if now > target_dt + timedelta(hours=2): continue
                   
-                  # 'YYYY-MM-DD-HH' で厳密にマップからデータを呼び出す
-                  lookup_key = f"{target_date_str}-{hour_val}"
-                  
-                  # 万が一取得できない場合は「空欄や誤魔化し」をせず、エラーログに書き出して原因を特定できるようにNoneを避ける
-                  if lookup_key in h_weather_map:
-                      sym = h_weather_map[lookup_key]
+                  # 日本時間「時間」の2桁文字列で直接マッピングを引く
+                  if hour_val in h_weather_map:
+                      sym = h_weather_map[hour_val]
                   else:
-                      print(f"[DEBUG] 時系列天気データが引けなかったためフォールバック発動: {lookup_key}")
-                      sym = "☁" # 安全な中立マークをセット
+                      print(f"[DEBUG] 時系列天気データ（{hour_val}時）がなかったためフォールバック: {hour_val}")
+                      sym = "☁"
                   
-                  if lookup_key in h_temp_map:
-                      temp = h_temp_map[lookup_key]
+                  if hour_val in h_temp_map:
+                      temp = h_temp_map[hour_val]
                   else:
                       if hour_val == "06": temp = t_min_num + 1
                       elif hour_val == "09": temp = t_min_num + 4
@@ -299,4 +298,4 @@ jobs:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v27-${{ github.run_id }}
+          key: weather-v2-cache-v28-${{ github.run_id }}
