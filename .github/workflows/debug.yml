@@ -1,0 +1,84 @@
+name: Update Weather and Clothing for Dot V2 (JMA Debug Version)
+
+on:
+  workflow_dispatch: # 手動実行でログをすぐに確認できるようにします
+
+jobs:
+  update-weather:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run JMA API Debugger
+        env:
+          QUOTE0_API_KEY: ${{ secrets.QUOTE0_API_KEY }}
+          QUOTE0_DEVICE_ID: ${{ secrets.QUOTE0_DEVICE_ID }}
+        run: |
+          cat << 'EOF' > debug_weather.py
+          import os
+          import json
+          import sys
+          import requests
+          from datetime import datetime, timedelta, timezone
+
+          JMA_FORECAST_URL = "https://www.jma.go.jp/bosai/forecast/data/forecast/016000.json"
+
+          try:
+              res = requests.get(JMA_FORECAST_URL, timeout=15).json()
+              jst_tz = timezone(timedelta(hours=9))
+              now = datetime.now(timezone.utc).astimezone(jst_tz)
+
+              print("================ JMA API DEBUG LOG ================")
+              print(f"現在時刻 (JST): {now.strftime('%Y-%m-%d %H:%M:%S')}")
+              print(f"レスポンスの全体の長さ (ブロック数): {len(res)}")
+              
+              if len(res) <= 1:
+                  print("【警告】res[1] (時系列ブロック) が存在しません。データ構造が変更された可能性があります。")
+                  sys.exit(0)
+
+              # --- res[1] の構造解析 ---
+              hourly_block = res[1]
+              time_defines = hourly_block.get("timeDefines", [])
+              print(f"\n--- [1] timeDefines (時間定義リスト) の中身 ({len(time_defines)}件) ---")
+              for idx, t_str in enumerate(time_defines):
+                  cleaned_t = t_str.replace("Z", "+00:00")
+                  dt_parsed = datetime.fromisoformat(cleaned_t).astimezone(jst_tz)
+                  print(f"  Index [{idx}]: JMA生データ='{t_str}' => JSTに変換='{dt_parsed.strftime('%Y-%m-%d %H:%M:%S')}'")
+
+              print("\n--- [2] areas 内の地域データ探索 ---")
+              time_series_list = hourly_block.get("timeSeries", [])
+              for ts_idx, ts in enumerate(time_series_list):
+                  print(f"\n▼ timeSeries[{ts_idx}] 内のエリア一覧:")
+                  for area_data in ts.get("areas", []):
+                      area_info = area_data.get("area", {})
+                      area_name = area_info.get("name")
+                      area_code = area_info.get("code")
+                      print(f"  - エリア名: {area_name} (コード: {area_code})")
+                      
+                      # 札幌市中央区のコード "016010" または "016000" に合致する場合、中身をダンプ
+                      if str(area_code) in ["016010", "016000"] or "石狩" in str(area_name):
+                          print(f"    👉 対象エリア合致！詳細データをダンプします:")
+                          if "weatherCodes" in area_data:
+                              print(f"      weatherCodes: {area_data['weatherCodes']}")
+                          if "temps" in area_data:
+                              print(f"      temps: {area_data['temps']}")
+                          if "weathers" in area_data:
+                              print(f"      weathers(テキストの天気): {area_data['weathers']}")
+                          if "winds" in area_data:
+                              print(f"      winds: {area_data['winds']}")
+
+              print("\n===================================================")
+
+          except Exception as e:
+              print(f"デバッグ実行中にエラーが発生しました: {e}")
+          EOF
+          python debug_weather.py
