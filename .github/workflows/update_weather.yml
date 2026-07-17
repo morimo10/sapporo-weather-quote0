@@ -1,4 +1,4 @@
-name: Update Weather and Clothing for Dot V2 (True JMA Combined Sync)
+name: Update Weather and Clothing for Dot V2 (True JMA Strict Area Sync)
 
 on:
   schedule:
@@ -30,9 +30,9 @@ jobs:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v25-${{ github.run_id }}
+          key: weather-v2-cache-v26-${{ github.run_id }}
           restore-keys: |
-            weather-v2-cache-v25-
+            weather-v2-cache-v26-
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -44,7 +44,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      # 2. Pythonスクリプトを実行（単一URLから時系列ブロックを正確に抽出）
+      # 2. Pythonスクリプトを実行（石狩地方 016010 を厳格ピンポイント抽出）
       - name: Generate and Push to Dot API
         env:
           QUOTE0_API_KEY: ${{ secrets.QUOTE0_API_KEY }}
@@ -61,17 +61,15 @@ jobs:
           API_KEY = os.environ.get("QUOTE0_API_KEY")
           DEVICE_ID = os.environ.get("QUOTE0_DEVICE_ID")
 
-          # 府県予報と地域時系列予報が両方含まれる統合JSON URL
           JMA_FORECAST_URL = "https://www.jma.go.jp/bosai/forecast/data/forecast/016000.json"
           DOT_API_URL = f"https://dot.mindreset.tech/api/authV2/open/device/{DEVICE_ID}/text"
 
-          # 天気コードからアイコンへの変換マッピング
           def code_to_symbol(code_str):
               c = str(code_str)
-              if c.startswith("1"): return "☀"  # 晴れ系
-              if c.startswith("2"): return "☁"  # 曇り系
-              if c.startswith("3"): return "☔"  # 雨系
-              if c.startswith("4"): return "☃"  # 雪系
+              if c.startswith("1"): return "☀"
+              if c.startswith("2"): return "☁"
+              if c.startswith("3"): return "☔"
+              if c.startswith("4"): return "☃"
               return "☁"
 
           def get_clothing_advice(temp):
@@ -93,7 +91,6 @@ jobs:
                   print(f"現在の時刻は {now.strftime('%H:%M')} です。7時〜21時の時間外のため実行をスキップします。")
                   sys.exit(0)
 
-              # 多重実行ガードチェック
               current_hour_str = now.strftime("%Y-%m-%d-%H")
               cache_file = "last_run_hour.txt"
               history_file = "weather_history.json"
@@ -105,14 +102,12 @@ jobs:
                       print(f"すでに【{now.strftime('%H:00')}時台】の最初の実行は完了しています。")
                       sys.exit(0)
 
-              # APIからデータ取得
               try:
                   res = requests.get(JMA_FORECAST_URL, timeout=15).json()
               except Exception as e:
                   print(f"気象庁サーバーからのデータ取得に失敗しました: {e}")
                   sys.exit(0)
 
-              # ターゲット設定 (17時以降は「明日」の予報モード)
               if 17 <= current_hour <= 23:
                   is_tomorrow_data = True
                   label_head = "明日"
@@ -126,15 +121,19 @@ jobs:
               # --- 1. 通常の府県予報ブロック (res[0]) から基本データ抽出 ---
               base_series = res[0]['timeSeries'][0]
               weather_areas = base_series['areas']
-              sapporo_weather = next((a for a in weather_areas if str(a['area']['code']).startswith("0160")), weather_areas[0])
+              # 府県予報側は広域の「016000」(石狩空知後志)で入ることが多いため、前方一致でフォールバック付き抽出
+              sapporo_weather = next((a for a in weather_areas if str(a['area']['code']) == "016010"), None)
+              if not sapporo_weather:
+                  sapporo_weather = next((a for a in weather_areas if str(a['area']['code']).startswith("0160")), weather_areas[0])
+              
               target_index = 1 if is_tomorrow_data else 0
 
-              # 降水確率の抽出 (res[0] の timeSeries[1] に格納されていることが多い)
+              # 降水確率の抽出
               hourly_pops = []
               pop_times = []
               for ts in res[0].get("timeSeries", []):
                   for a in ts.get("areas", []):
-                      if str(a['area']['code']).startswith("0160") or a['area']['name'] in ["石狩地方", "石狩空知後志地方"]:
+                      if str(a['area']['code']) in ["016010", "016000"] or "石狩" in a['area']['name']:
                           if 'pops' in a:
                               hourly_pops = a['pops']
                               pop_times = ts.get('timeDefines', [])
@@ -152,7 +151,7 @@ jobs:
 
               # 今日・明日の最高・最低気温の抽出
               temp_series = res[0]['timeSeries'][2]
-              temps = next((a for a in temp_series['areas'] if str(a['area']['code']).startswith("0160")), temp_series['areas'][0])['temps']
+              temps = next((a for a in temp_series['areas'] if str(a['area']['code']) in ["016010", "016000"]), temp_series['areas'][0])['temps']
               tmin_raw = temps[2] if is_tomorrow_data and len(temps) >= 4 else (temps[0] if len(temps) > 0 else "14")
               tmax_raw = temps[3] if is_tomorrow_data and len(temps) >= 4 else (temps[1] if len(temps) > 1 else "25")
 
@@ -183,7 +182,7 @@ jobs:
 
               history_data[target_date_str] = t_max_num
 
-              # --- 2. 【地域時系列予報】ブロック (res[1]) から3時間ごとのデータ抽出 ---
+              # --- 2. 【地域時系列予報】ブロック (res[1]) から 016010 (石狩地方) を厳格抽出 ---
               h_weather_map = {}
               h_temp_map = {}
               
@@ -193,8 +192,8 @@ jobs:
                   
                   for ts in hourly_block.get("timeSeries", []):
                       for a in ts.get("areas", []):
-                          # 札幌管区（石狩地方コード 016010 やアメダスコード等）に紐づくデータを探索
-                          if str(a['area']['code']).startswith("0160") or "石狩" in a['area']['name'] or "札幌" in a['area']['name']:
+                          # 札幌（石狩地方）の固有コード「016010」に完全一致するものだけを抽出
+                          if str(a['area']['code']) == "016010":
                               if "weatherCodes" in a:
                                   w_codes = a["weatherCodes"]
                                   for idx, t_str in enumerate(hourly_time_defines):
@@ -210,7 +209,7 @@ jobs:
                                           if str(t_values[idx]).strip() != "":
                                               h_temp_map[dt_parsed.strftime("%H")] = int(t_values[idx])
 
-              # タイトルのメイン天気アイコン（時系列予報の昼12時の天気があれば優先、なければ通常変換）
+              # 万が一の保険（厳格一致でマップが空になった場合は通常天気コードから生成）
               main_symbol = h_weather_map.get("12", code_to_symbol(sapporo_weather['weatherCodes'][target_index]))
               title_text = f"{label_head}札幌市中央区{main_symbol}"
 
@@ -229,13 +228,12 @@ jobs:
                   target_dt = base_dt.replace(hour=int(hour_val), minute=0, second=0, microsecond=0)
                   if now > target_dt + timedelta(hours=2): continue
                   
-                  # 時系列ブロックから完全同期
-                  sym = h_weather_map.get(hour_val, "☁")
+                  # マップから取得。存在しなければメインアイコンを安全なフォールバックとする
+                  sym = h_weather_map.get(hour_val, main_symbol)
                   
                   if hour_val in h_temp_map:
                       temp = h_temp_map[hour_val]
                   else:
-                      # 万が一データが取れなかった場合の安全な補間計算
                       if hour_val == "06": temp = t_min_num + 1
                       elif hour_val == "09": temp = t_min_num + 4
                       elif hour_val == "12": temp = t_max_num - 2
@@ -291,4 +289,4 @@ jobs:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v25-${{ github.run_id }}
+          key: weather-v2-cache-v26-${{ github.run_id }}
