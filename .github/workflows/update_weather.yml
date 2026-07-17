@@ -1,55 +1,37 @@
-name: Update Weather and Clothing for Dot V2 (True JMA Strict Area Sync)
+name: Hourly Weather Screen Update
 
 on:
   schedule:
-    - cron: '17 0-9,21-23 * * *'
-    - cron: '37 0-9,21-23 * * *'
-    - cron: '47 0-9,21-23 * * *'
-    - cron: '53 0-9,21-23 * * *'
-  workflow_dispatch:
-
-concurrency:
-  group: daytime-job
-  cancel-in-progress: false
-
-permissions:
-  contents: write
+    # 毎日毎時 0分 に自動実行 (UTC 22:00〜13:00 = JST 07:00〜22:00)
+    - cron: '0 22,23,0,1,2,3,4,5,6,7,8,9,10,11,12,13 * * *'
+  workflow_dispatch: # 手動実行用
 
 jobs:
   update-weather:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # キャッシュをリポジトリにPushするために必要
+    
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 1. キャッシュの復元
-      - name: Restore Last Run Hour and Temp Cache
-        id: cache-restore
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            last_run_hour.txt
-            weather_history.json
-          key: weather-v2-cache-v29-${{ github.run_id }}
-          restore-keys: |
-            weather-v2-cache-v29-
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
+          python-version: '3.10'
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install requests
 
-      # 2. Pythonスクリプトを実行（JST変換処理を厳密に実施）
-      - name: Generate and Push to Dot API
+      - name: Generate and Run Python Script
         env:
           QUOTE0_API_KEY: ${{ secrets.QUOTE0_API_KEY }}
           QUOTE0_DEVICE_ID: ${{ secrets.QUOTE0_DEVICE_ID }}
         run: |
+          # Pythonファイルをその場で一時生成 (インデントやクォーテーションを壊さないよう記述)
           cat << 'EOF' > update_weather.py
           import os
           import json
@@ -82,7 +64,6 @@ jobs:
               else: return "ダウン"
 
           try:
-              # タイムゾーン定義
               utc_tz = timezone.utc
               jst_tz = timezone(timedelta(hours=9))
 
@@ -121,16 +102,27 @@ jobs:
               today_date_str = now.strftime("%Y-%m-%d")
               target_date_str = (now + timedelta(days=1)).strftime("%Y-%m-%d") if is_tomorrow_data else today_date_str
 
-              # --- 1. 通常の府県予報ブロック (res[0]) から基本データ抽出 ---
+              history_data = {}
+              if os.path.exists(history_file):
+                  try:
+                      with open(history_file, "r") as f:
+                          history_data = json.load(f)
+                  except Exception as e:
+                      print(f"キャッシュファイルの読み込みに失敗しました: {e}")
+
+              if "hourly_cache" not in history_data:
+                  history_data["hourly_cache"] = {}
+              if "max_temp_history" not in history_data:
+                  history_data["max_temp_history"] = {}
+
               base_series = res[0]['timeSeries'][0]
               weather_areas = base_series['areas']
-              sapporo_weather = next((a for a in weather_areas if str(a['area']['code']) == "016010"), None)
-              if not sapporo_weather:
-                  sapporo_weather = next((a for a in weather_areas if str(a['area']['code']).startswith("0160")), weather_areas[0])
+              sapporo_weather = next((a for a in weather_areas if str(a['area']['code']) == "016000"), weather_areas[0])
               
               target_index = 1 if is_tomorrow_data else 0
+              default_weather_code = sapporo_weather['weatherCodes'][target_index]
+              main_symbol = code_to_symbol(default_weather_code)
 
-              # 降水確率の抽出
               hourly_pops = []
               pop_times = []
               for ts in res[0].get("timeSeries", []):
@@ -151,7 +143,6 @@ jobs:
               prob_str = f"{max_prob}%"
               umbrella_mark = "☔" if max_prob >= 50 else ("☂" if max_prob >= 30 else "")
 
-              # 今日・明日の最高・最低気温の抽出
               temp_series = res[0]['timeSeries'][2]
               temps = next((a for a in temp_series['areas'] if str(a['area']['code']) in ["016010", "016000"]), temp_series['areas'][0])['temps']
               tmin_raw = temps[2] if is_tomorrow_data and len(temps) >= 4 else (temps[0] if len(temps) > 0 else "14")
@@ -165,28 +156,21 @@ jobs:
               t_min_num = int(str(tmin_raw).strip()) if str(tmin_raw).strip().isdigit() else 14
               t_max_num = int(str(tmax_raw).strip()) if str(tmax_raw).strip().isdigit() else 25
 
-              # 前日比計算用ヒストリ保存
-              history_data = {}
-              if os.path.exists(history_file):
-                  try:
-                      with open(history_file, "r") as f: history_data = json.load(f)
-                  except: pass
-
-              diff_str = "(?)"
-              if is_tomorrow_data and today_date_str in history_data:
-                  diff = t_max_num - history_data[today_date_str]
+              diff_str = ""
+              max_temp_hist = history_data["max_temp_history"]
+              if is_tomorrow_data and today_date_str in max_temp_hist:
+                  diff = t_max_num - max_temp_hist[today_date_str]
                   diff_str = f"(+{diff})" if diff > 0 else (f"({diff})" if diff < 0 else "(±0)")
               elif not is_tomorrow_data:
                   yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
-                  if yesterday_str in history_data:
-                      diff = t_max_num - history_data[yesterday_str]
+                  if yesterday_str in max_temp_hist:
+                      diff = t_max_num - max_temp_hist[yesterday_str]
                       diff_str = f"(+{diff})" if diff > 0 else (f"({diff})" if diff < 0 else "(±0)")
 
-              history_data[target_date_str] = t_max_num
+              max_temp_hist[target_date_str] = t_max_num
 
-              # --- 2. 【地域時系列予報】ブロック (res[1]) からパース ---
-              h_weather_map = {}
-              h_temp_map = {}
+              api_weather_map = {}
+              api_temp_map = {}
               
               if len(res) > 1:
                   hourly_block = res[1]
@@ -194,36 +178,53 @@ jobs:
                   
                   for ts in hourly_block.get("timeSeries", []):
                       for a in ts.get("areas", []):
-                          if str(a['area']['code']) == "016010":
+                          if str(a['area']['code']) in ["14163", "016010", "016000"]:
                               if "weatherCodes" in a:
                                   w_codes = a["weatherCodes"]
                                   for idx, t_str in enumerate(hourly_time_defines):
-                                      # 気象庁のISO表記時刻（末尾にZがつくかどうかにかかわらず安全に処理）
                                       cleaned_t = t_str.replace("Z", "+00:00")
                                       dt_parsed = datetime.fromisoformat(cleaned_t).astimezone(jst_tz)
                                       
-                                      if dt_parsed.strftime("%Y-%m-%d") == target_date_str and idx < len(w_codes):
-                                          hour_key = dt_parsed.strftime("%H")
-                                          h_weather_map[hour_key] = code_to_symbol(w_codes[idx])
-                                          print(f"[DEBUG-LOAD] 天気登録完了: 時刻={hour_key}時, マーク={h_weather_map[hour_key]} (元コード={w_codes[idx]})")
-                              
+                                      d_key = dt_parsed.strftime("%Y-%m-%d")
+                                      h_key = dt_parsed.strftime("%H")
+                                      symbol = code_to_symbol(w_codes[idx])
+                                      
+                                      if d_key == target_date_str:
+                                          api_weather_map[h_key] = symbol
+                                      
+                                      cache_key = f"{d_key}_{h_key}"
+                                      if cache_key not in history_data["hourly_cache"]:
+                                          history_data["hourly_cache"][cache_key] = {}
+                                      history_data["hourly_cache"][cache_key]["symbol"] = symbol
+
                               if "temps" in a:
                                   t_values = a["temps"]
                                   for idx, t_str in enumerate(hourly_time_defines):
                                       cleaned_t = t_str.replace("Z", "+00:00")
                                       dt_parsed = datetime.fromisoformat(cleaned_t).astimezone(jst_tz)
                                       
-                                      if dt_parsed.strftime("%Y-%m-%d") == target_date_str and idx < len(t_values):
-                                          if str(t_values[idx]).strip() != "":
-                                              hour_key = dt_parsed.strftime("%H")
-                                              h_temp_map[hour_key] = int(t_values[idx])
-                                              print(f"[DEBUG-LOAD] 気温登録完了: 時刻={hour_key}時, 気温={h_temp_map[hour_key]}°C")
+                                      d_key = dt_parsed.strftime("%Y-%m-%d")
+                                      h_key = dt_parsed.strftime("%H")
+                                      
+                                      if d_key == target_date_str and str(t_values[idx]).strip() != "":
+                                          api_temp_map[h_key] = int(t_values[idx])
+                                      
+                                      cache_key = f"{d_key}_{h_key}"
+                                      if str(t_values[idx]).strip() != "":
+                                          if cache_key not in history_data["hourly_cache"]:
+                                              history_data["hourly_cache"][cache_key] = {}
+                                          history_data["hourly_cache"][cache_key]["temp"] = int(t_values[idx])
 
-              # タイトルの代表天気は12時のものを使用（なければ府県予報から）
-              main_symbol = h_weather_map.get("12", code_to_symbol(sapporo_weather['weatherCodes'][target_index]))
-              title_text = f"{label_head}札幌市中央区{main_symbol}"
+              threshold_day = (now - timedelta(days=3)).strftime("%Y-%m-%d")
+              history_data["hourly_cache"] = {k: v for k, v in history_data["hourly_cache"].items() if k >= threshold_day}
+              history_data["max_temp_history"] = {k: v for k, v in history_data["max_temp_history"].items() if k >= threshold_day}
 
-              # 表示行の構築（直近最大4コマ）
+              title_symbol = api_weather_map.get("12")
+              if not title_symbol:
+                  title_symbol = history_data["hourly_cache"].get(f"{target_date_str}_12", {}).get("symbol", main_symbol)
+              
+              title_text = f"{label_head}札幌市中央区{title_symbol}"
+
               forecast_lines = [f"低:{t_min_num}°C 高:{t_max_num}°C{diff_str} 傘:{prob_str}{umbrella_mark}"]
               hourly_slots = [
                   ("06", "06:00"), ("09", "09:00"), ("12", "12:00"),
@@ -238,22 +239,25 @@ jobs:
                   target_dt = base_dt.replace(hour=int(hour_val), minute=0, second=0, microsecond=0)
                   if now > target_dt + timedelta(hours=2): continue
                   
-                  # マップから取得
-                  if hour_val in h_weather_map:
-                      sym = h_weather_map[hour_val]
-                  else:
-                      print(f"[DEBUG-OUTPUT] 時系列天気データ（{hour_val}時）がなかったためフォールバック発動。メイン天気（{main_symbol}）を適用")
-                      sym = main_symbol
+                  cache_lookup_key = f"{target_date_str}_{hour_val}"
+                  cached_entry = history_data["hourly_cache"].get(cache_lookup_key, {})
+
+                  sym = api_weather_map.get(hour_val)
+                  if not sym:
+                      sym = cached_entry.get("symbol")
+                      if not sym:
+                          sym = main_symbol
                   
-                  if hour_val in h_temp_map:
-                      temp = h_temp_map[hour_val]
-                  else:
-                      if hour_val == "06": temp = t_min_num + 1
-                      elif hour_val == "09": temp = t_min_num + 4
-                      elif hour_val == "12": temp = t_max_num - 2
-                      elif hour_val == "15": temp = t_max_num - 1
-                      elif hour_val == "18": temp = t_max_num - 3
-                      else: temp = t_min_num + 3
+                  temp = api_temp_map.get(hour_val)
+                  if temp is None:
+                      temp = cached_entry.get("temp")
+                      if temp is None:
+                          if hour_val == "06": temp = t_min_num + 1
+                          elif hour_val == "09": temp = t_min_num + 4
+                          elif hour_val == "12": temp = t_max_num - 2
+                          elif hour_val == "15": temp = t_max_num - 1
+                          elif hour_val == "18": temp = t_max_num - 3
+                          else: temp = t_min_num + 3
                   
                   advice = get_clothing_advice(temp)
                   forecast_lines.append(f"{label} {sym} {temp}°C {advice}")
@@ -261,7 +265,6 @@ jobs:
 
               message_text = "\n".join(forecast_lines)
 
-              # API送信
               headers = {
                   "Authorization": f"Bearer {API_KEY}",
                   "Content-Type": "application/json"
@@ -272,9 +275,8 @@ jobs:
                   "message": message_text
               }
               
-              print("--- 送信データ内容ログ ---")
+              print("--- 送信内容 ---")
               print(f"Title : {title_text}")
-              print("Message:")
               print(message_text)
               
               for attempt in range(3):
@@ -282,25 +284,38 @@ jobs:
                       response = requests.post(DOT_API_URL, headers=headers, json=payload, timeout=15)
                       if response.status_code == 200:
                           print("APIへの送信に成功しました。")
-                          with open(cache_file, "w") as f: f.write(current_hour_str)
-                          with open(history_file, "w") as f: json.dump(history_data, f, ensure_ascii=False, indent=2)
+                          with open(cache_file, "w") as f: 
+                              f.write(current_hour_str)
+                          with open(history_file, "w") as f: 
+                              json.dump(history_data, f, ensure_ascii=False, indent=2)
                           break
                       time.sleep(3)
-                  except:
+                  except Exception as api_err:
+                      print(f"送信リトライ中... エラー: {api_err}")
                       time.sleep(3)
 
           except Exception as e:
               print(f"エラーが発生しました: {e}")
               sys.exit(1)
           EOF
-          python update_weather.py
 
-      # 3. キャッシュを確実に保存
-      - name: Save Run Hour and Temp Cache
-        uses: actions/cache/save@v4
-        if: always()
-        with:
-          path: |
-            last_run_hour.txt
-            weather_history.json
-          key: weather-v2-cache-v29-${{ github.run_id }}
+          # 作成したPythonを実行
+          python update_weather.py
+          
+          # 実行が終わったらPythonファイル単体は削除（リポジトリを汚さないため）
+          rm update_weather.py
+
+      - name: Commit and Push Cache files
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          # 更新されたログとキャッシュデータをリポジトリに追加
+          git add last_run_hour.txt weather_history.json || true
+          
+          if git diff --staged --quiet; then
+            echo "キャッシュファイルの更新はありません。"
+          else
+            git commit -m "chore: update weather cache [skip ci]"
+            git push origin main
+          fi
