@@ -219,43 +219,42 @@ jobs:
                   print(f"気象庁サーバーへの接続または名前解決に失敗しました: {e}")
                   sys.exit(0)
 
-              # ================== 【一時挿入：デバッグ表示】 ==================
-              print("===== 【デバッグ】timeSeries の全構造確認 =====")
-              for idx, ts in enumerate(res[0].get("timeSeries", [])):
-                  first_area = ts.get("areas")[0]
-                  print(f"Index {idx} ({first_area.get('area', {}).get('name')}): areasのキー一覧 -> {list(first_area.keys())}")
-              print("======================================================")
-              # ==========================================================
-
-              # 時系列オブジェクトの抽出
-              hourly_series = res[0]['timeSeries'][1]
-              hourly_times_root = hourly_series['timeDefines'] 
+              # 時系列データの柔軟な自動走査抽出
+              hourly_weather_codes = []
+              hourly_pops = []
+              hourly_times_root = []
               
-              # 石狩・札幌に該当するエリアデータを広域一致も含めてより柔軟に探索
-              sapporo_hourly = None
-              for a in hourly_series['areas']:
-                  code_str = str(a['area']['code'])
-                  if code_str.startswith("0160") or a['area']['name'] in ["石狩地方", "石狩空知後志地方"]:
-                      if 'weatherCodes' in a or 'weatherCode' in a or 'pops' in a:
-                          sapporo_hourly = a
-                          break
-              if not sapporo_hourly:
-                  sapporo_hourly = hourly_series['areas'][0]
-              
-              hourly_weather_codes = sapporo_hourly.get('weatherCodes', sapporo_hourly.get('weatherCode', []))
-              hourly_pops = sapporo_hourly.get('pops', [])
+              for ts in res[0].get("timeSeries", []):
+                  for a in ts.get("areas", []):
+                      code_str = str(a['area']['code'])
+                      if code_str.startswith("0160") or a['area']['name'] in ["石狩地方", "石狩空知後志地方"]:
+                          if 'weatherCodes' in a:
+                              hourly_weather_codes = a['weatherCodes']
+                              if ts.get('timeDefines') and not hourly_times_root:
+                                  hourly_times_root = ts['timeDefines']
+                          if 'pops' in a:
+                              hourly_pops = a['pops']
+                              if ts.get('timeDefines') and not hourly_times_root:
+                                  hourly_times_root = ts['timeDefines']
 
               # --- デバッグ用：生データログを出力 ---
               print("================ [JMA RAW DATA LOG] ================")
               try:
-                  print(f"【対象エリア名】: {sapporo_hourly['area']['name']} ({sapporo_hourly['area']['code']})")
                   print(f"【札幌管区の生テキスト配列】: {res[0]['timeSeries'][0]['areas'][0].get('weathers', [])}")
-                  print("\n【時系列予報（3時間ごと）の生データ】:")
-                  for i, t_str in enumerate(hourly_times_root):
-                      dt = datetime.fromisoformat(t_str.replace("Z", "+00:00")).astimezone(jst)
+                  print("\n【時系列予報の同期チェック】:")
+                  max_len = max(len(hourly_weather_codes), len(hourly_pops), len(hourly_times_root))
+                  for i in range(max_len):
+                      t_str = hourly_times_root[i] if i < len(hourly_times_root) else "UNKNOWN TIME"
                       code = hourly_weather_codes[i] if i < len(hourly_weather_codes) else "N/A"
                       pop = hourly_pops[i] if i < len(hourly_pops) else "N/A"
-                      print(f"  - 時刻: {dt.strftime('%Y-%m-%d %H:%M')} | 天気コード: {code} | 降水確率: {pop}%")
+                      
+                      if t_str != "UNKNOWN TIME":
+                          dt = datetime.fromisoformat(t_str.replace("Z", "+00:00")).astimezone(jst)
+                          t_display = dt.strftime('%Y-%m-%d %H:%M')
+                      else:
+                          t_display = t_str
+                          
+                      print(f"  - 時刻: {t_display} | 天気コード: {code} | 降水確率: {pop}%")
               except Exception as log_err:
                   print(f"ログ出力中にエラーが発生しました: {log_err}")
               print("====================================================")
