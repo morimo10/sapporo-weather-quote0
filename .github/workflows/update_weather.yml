@@ -219,7 +219,15 @@ jobs:
                   print(f"気象庁サーバーへの接続または名前解決に失敗しました: {e}")
                   sys.exit(0)
 
-              # 時系列オブジェクトの抽出を安全に強化
+              # ================== 【一時挿入：デバッグ表示】 ==================
+              print("===== 【デバッグ】timeSeries の全構造確認 =====")
+              for idx, ts in enumerate(res[0].get("timeSeries", [])):
+                  first_area = ts.get("areas")[0]
+                  print(f"Index {idx} ({first_area.get('area', {}).get('name')}): areasのキー一覧 -> {list(first_area.keys())}")
+              print("======================================================")
+              # ==========================================================
+
+              # 時系列オブジェクトの抽出
               hourly_series = res[0]['timeSeries'][1]
               hourly_times_root = hourly_series['timeDefines'] 
               
