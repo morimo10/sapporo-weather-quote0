@@ -30,9 +30,9 @@ jobs:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v26-${{ github.run_id }}
+          key: weather-v2-cache-v27-${{ github.run_id }}
           restore-keys: |
-            weather-v2-cache-v26-
+            weather-v2-cache-v27-
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -44,7 +44,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      # 2. Pythonスクリプトを実行（石狩地方 016010 を厳格ピンポイント抽出）
+      # 2. Pythonスクリプトを実行（時系列データのマッピング時間を厳密に比較）
       - name: Generate and Push to Dot API
         env:
           QUOTE0_API_KEY: ${{ secrets.QUOTE0_API_KEY }}
@@ -121,7 +121,6 @@ jobs:
               # --- 1. 通常の府県予報ブロック (res[0]) から基本データ抽出 ---
               base_series = res[0]['timeSeries'][0]
               weather_areas = base_series['areas']
-              # 府県予報側は広域の「016000」(石狩空知後志)で入ることが多いため、前方一致でフォールバック付き抽出
               sapporo_weather = next((a for a in weather_areas if str(a['area']['code']) == "016010"), None)
               if not sapporo_weather:
                   sapporo_weather = next((a for a in weather_areas if str(a['area']['code']).startswith("0160")), weather_areas[0])
@@ -182,7 +181,7 @@ jobs:
 
               history_data[target_date_str] = t_max_num
 
-              # --- 2. 【地域時系列予報】ブロック (res[1]) から 016010 (石狩地方) を厳格抽出 ---
+              # --- 2. 【地域時系列予報】ブロック (res[1]) から厳密に時間一致するデータのみを抽出 ---
               h_weather_map = {}
               h_temp_map = {}
               
@@ -192,14 +191,16 @@ jobs:
                   
                   for ts in hourly_block.get("timeSeries", []):
                       for a in ts.get("areas", []):
-                          # 札幌（石狩地方）の固有コード「016010」に完全一致するものだけを抽出
                           if str(a['area']['code']) == "016010":
                               if "weatherCodes" in a:
                                   w_codes = a["weatherCodes"]
                                   for idx, t_str in enumerate(hourly_time_defines):
+                                      # 時刻文字列をパースし、日付＋時間の完全一致でマッピング
                                       dt_parsed = datetime.fromisoformat(t_str.replace("Z", "+00:00")).astimezone(jst)
                                       if dt_parsed.strftime("%Y-%m-%d") == target_date_str and idx < len(w_codes):
-                                          h_weather_map[dt_parsed.strftime("%H")] = code_to_symbol(w_codes[idx])
+                                          # キーを 'HH' のみではなく 'YYYY-MM-DD-HH' で厳密に保持
+                                          key_str = dt_parsed.strftime("%Y-%m-%d-%H")
+                                          h_weather_map[key_str] = code_to_symbol(w_codes[idx])
                               
                               if "temps" in a:
                                   t_values = a["temps"]
@@ -207,10 +208,12 @@ jobs:
                                       dt_parsed = datetime.fromisoformat(t_str.replace("Z", "+00:00")).astimezone(jst)
                                       if dt_parsed.strftime("%Y-%m-%d") == target_date_str and idx < len(t_values):
                                           if str(t_values[idx]).strip() != "":
-                                              h_temp_map[dt_parsed.strftime("%H")] = int(t_values[idx])
+                                              key_str = dt_parsed.strftime("%Y-%m-%d-%H")
+                                              h_temp_map[key_str] = int(t_values[idx])
 
-              # 万が一の保険（厳格一致でマップが空になった場合は通常天気コードから生成）
-              main_symbol = h_weather_map.get("12", code_to_symbol(sapporo_weather['weatherCodes'][target_index]))
+              # タイトルアイコンの決定
+              main_key = f"{target_date_str}-12"
+              main_symbol = h_weather_map.get(main_key, code_to_symbol(sapporo_weather['weatherCodes'][target_index]))
               title_text = f"{label_head}札幌市中央区{main_symbol}"
 
               # 表示行の構築（直近最大4コマ）
@@ -228,11 +231,18 @@ jobs:
                   target_dt = base_dt.replace(hour=int(hour_val), minute=0, second=0, microsecond=0)
                   if now > target_dt + timedelta(hours=2): continue
                   
-                  # マップから取得。存在しなければメインアイコンを安全なフォールバックとする
-                  sym = h_weather_map.get(hour_val, main_symbol)
+                  # 'YYYY-MM-DD-HH' で厳密にマップからデータを呼び出す
+                  lookup_key = f"{target_date_str}-{hour_val}"
                   
-                  if hour_val in h_temp_map:
-                      temp = h_temp_map[hour_val]
+                  # 万が一取得できない場合は「空欄や誤魔化し」をせず、エラーログに書き出して原因を特定できるようにNoneを避ける
+                  if lookup_key in h_weather_map:
+                      sym = h_weather_map[lookup_key]
+                  else:
+                      print(f"[DEBUG] 時系列天気データが引けなかったためフォールバック発動: {lookup_key}")
+                      sym = "☁" # 安全な中立マークをセット
+                  
+                  if lookup_key in h_temp_map:
+                      temp = h_temp_map[lookup_key]
                   else:
                       if hour_val == "06": temp = t_min_num + 1
                       elif hour_val == "09": temp = t_min_num + 4
@@ -289,4 +299,4 @@ jobs:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v26-${{ github.run_id }}
+          key: weather-v2-cache-v27-${{ github.run_id }}
