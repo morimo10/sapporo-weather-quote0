@@ -115,7 +115,9 @@ jobs:
                   if not matched:
                       current_text = current_text[1:]
                       
+              # 末尾に残ってしまった記号を綺麗に削除
               result = result.rstrip("→｜")
+              
               return result if result else "☁"
 
           def get_clothing_advice(temp):
@@ -274,29 +276,6 @@ jobs:
 
                   return history_data.get(pop_cache_key, max_prob)
 
-              hourly_weathers = sapporo_hourly.get('weathers', [])
-              weather_times = hourly_times_root[-len(hourly_weathers):] if hourly_weathers else []
-              
-              def get_hourly_weather_emoji(target_hour_str):
-                  base_dt = now + timedelta(days=1) if is_tomorrow_data else now
-                  target_dt = base_dt.replace(hour=int(target_hour_str), minute=0, second=0, microsecond=0)
-                  
-                  matched_code = None
-                  if hourly_weathers and weather_times:
-                      best_diff = timedelta(days=1)
-                      for t_str, code in zip(weather_times, hourly_weathers):
-                          dt_parsed = datetime.fromisoformat(t_str.replace("Z", "+00:00")).astimezone(jst)
-                          if dt_parsed <= target_dt:
-                              diff = target_dt - dt_parsed
-                              if diff < best_diff and diff < timedelta(hours=6) and str(code).strip() != "":
-                                  best_diff = diff
-                                  matched_code = str(code).strip()
-                  
-                  if matched_code:
-                      plain_text = JMA_WEATHER_MAP.get(matched_code, "曇")
-                      return convert_weather_text_to_emoji(plain_text)
-                  return "☁"
-
               forecast_lines = [f"最低:{t_min_num}°C{min_diff_str} 最高:{t_max_num}°C{max_diff_str}"]
               
               hourly_slots = [
@@ -312,8 +291,7 @@ jobs:
                   if now > target_dt + timedelta(hours=2):
                       continue
                       
-                  w_emoji = get_hourly_weather_emoji(hour_val)
-                  
+                  pop = get_pop_data(hour_val)
                   if hour_val == "06": temp = t_min_num + 1
                   elif hour_val == "09": temp = t_min_num + 4
                   elif hour_val == "12": temp = t_max_num - 2
@@ -321,12 +299,11 @@ jobs:
                   elif hour_val == "18": temp = t_max_num - 4
                   else: temp = t_min_num + 2
                   
+                  temp_str = f"{temp}°C".rjust(5, " ")
+                  pop_str = f"({pop}%)".rjust(6, " ")
                   advice_str = get_clothing_advice(temp)
                   
-                  w_emoji_pad = w_emoji.ljust(3, "　")
-                  temp_str = f"{temp}°C".rjust(5, " ")
-                  
-                  forecast_lines.append(f"{label} {w_emoji_pad} {temp_str}  {advice_str}")
+                  forecast_lines.append(f"{label} {temp_str} {pop_str} {advice_str}")
                   valid_rows_count += 1
 
               weather_message = "\n".join(forecast_lines)
