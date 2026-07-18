@@ -98,11 +98,11 @@ jobs:
               cleaned_text = text.replace("｜", "").replace("┃", "").strip()
               mapping = {
                   "晴": "☀", "曇": "☁", "雨": "☔", "雪": "❄", "霧": "🌫", "みぞれ": "🌨",
-                  "後": "後", "時々": "時々", "一時": "一時"
+                  "後": "➡", "時々": "➡", "一時": "🕐"
               }
               result = ""
               current_text = cleaned_text
-              tokens = ["晴", "曇", "雨", "雪", "霧", "みぞれ", "後", "時々", "一時"]
+              tokens = ["時々", "一時", "みぞれ", "晴", "曇", "雨", "雪", "霧", "後"]
               
               while current_text:
                   matched = False
@@ -295,9 +295,8 @@ jobs:
                   elif hour_val == "18": temp = t_max_num - 4
                   else: temp = t_min_num + 2
                   
-                  # 高度な等幅フォーマット処理（プロポーショナルフォントでのズレを防止）
-                  temp_str = f"{temp}°C".rjust(5, " ")  # 気温を5マス分で右詰め（-10°C や 5°C に対応）
-                  pop_str = f"({pop}%)".rjust(6, " ")  # 降水確率を6マス分で右詰め（(100%) や (0%) に対応）
+                  temp_str = f"{temp}°C".rjust(5, " ")
+                  pop_str = f"({pop}%)".rjust(6, " ")
                   advice_str = get_clothing_advice(temp)
                   
                   forecast_lines.append(f"{label} {temp_str} {pop_str} {advice_str}")
