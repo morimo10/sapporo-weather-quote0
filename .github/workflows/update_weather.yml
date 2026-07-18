@@ -234,8 +234,16 @@ jobs:
               for series in res[0]['timeSeries']:
                   areas = series.get('areas', [])
                   if not areas: continue
-                  # 札幌管区(0160XX)のエリアデータを探索
-                  target_area = next((a for a in areas if str(a['area']['code']).startswith("0160") or str(a['area']['code']) == "14163"), None)
+                  
+                  # 型の違い（数値・文字列）や、エリア名「札幌」を部分一致で確実に捕まえる
+                  target_area = None
+                  for a in areas:
+                      code_str = str(a['area'].get('code', ''))
+                      name_str = a['area'].get('name', '')
+                      if code_str.startswith("0160") or code_str == "14163" or "札幌" in name_str:
+                          target_area = a
+                          break
+                  
                   if not target_area:
                       target_area = areas[0]
 
