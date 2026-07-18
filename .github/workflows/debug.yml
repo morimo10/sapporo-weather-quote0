@@ -1,4 +1,4 @@
-name: Update Weather and Clothing for Dot V2 (True 3-Hour Debug)
+name: Update Weather and Clothing for Dot V2 (JMA Data Mapping Debug)
 
 on:
   workflow_dispatch:
@@ -18,47 +18,61 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
-      - name: Run True 3-Hour API Debugger
+      - name: Run JMA Detail Mapper Debugger
         run: |
-          cat << 'EOF' > debug_true_3hour.py
+          cat << 'EOF' > debug_mapping.py
           import requests
           from datetime import datetime, timedelta, timezone
 
-          # 石狩地方 (札幌) の地域時系列予報用URL
-          URL = "https://www.jma.go.jp/bosai/forecast/data/jma/016010.json"
+          URL = "https://www.jma.go.jp/bosai/forecast/data/forecast/016000.json"
 
           try:
-              res = requests.get(URL, timeout=15)
-              print(f"Status Code: {res.status_code}")
-              if res.status_code != 200:
-                  print("URLが存在しません。")
-                  exit(1)
-                  
-              data = res.json()
-              print("================ JMA TRUE 3-HOUR DEBUG LOG ================")
+              res = requests.get(URL, timeout=15).json()
+              jst_tz = timezone(timedelta(hours=9))
               
-              # 時系列データのスキャン
-              time_series = data.get("timeSeries", [])
-              print(f"timeSeriesのブロック数: {len(time_series)}")
+              print("================ JMA FORECAST MAPPING DEBUG ================")
+              block0 = res[0]
+              time_series_list = block0.get("timeSeries", [])
               
-              for ts_idx, ts in enumerate(time_series):
-                  t_defines = ts.get("timeDefines", [])
-                  print(f"\n▼ timeSeries[{ts_idx}] 時間定義数: {len(t_defines)}")
-                  if t_defines:
-                      print(f"  最初の時間サンプル: {t_defines[:3]}")
-                  
-                  for area in ts.get("areas", []):
-                      a_name = area.get("area", {}).get("name", "")
-                      a_code = area.get("area", {}).get("code", "")
-                      print(f"    👉 エリア: {a_name} ({a_code})")
-                      print(f"      含まれるキー: {list(area.keys())}")
-                      for k, v in area.items():
-                          if k != "area":
-                              print(f"      {k}: {v[:4]}") # 最初の4件をダンプ
+              # --- 1. 天気コードブロック (timeSeries[0]) ---
+              print("\n■ 【timeSeries[0]】天気コード・風・波のブロック")
+              ts0_times = time_series_list[0].get("timeDefines", [])
+              print(f"  時間定義数: {len(ts0_times)}")
+              for idx, t in enumerate(ts0_times):
+                  dt = datetime.fromisoformat(t.replace("Z", "+00:00")).astimezone(jst_tz)
+                  print(f"    Index [{idx}]: {dt.strftime('%Y-%m-%d %H:%M')} ({t})")
+              
+              for area in time_series_list[0].get("areas", []):
+                  if "石狩" in area.get("area", {}).get("name", ""):
+                      print(f"    👉 石狩地方の天気コード: {area.get('weatherCodes', [])}")
 
-              print("\n=============================================================")
+              # --- 2. 降水確率ブロック (timeSeries[1]) ---
+              print("\n■ 【timeSeries[1]】降水確率(pops)のブロック")
+              ts1_times = time_series_list[1].get("timeDefines", [])
+              print(f"  時間定義数: {len(ts1_times)}")
+              for idx, t in enumerate(ts1_times):
+                  dt = datetime.fromisoformat(t.replace("Z", "+00:00")).astimezone(jst_tz)
+                  print(f"    Index [{idx}]: {dt.strftime('%Y-%m-%d %H:%M')} ({t})")
+              
+              for area in time_series_list[1].get("areas", []):
+                  if "石狩" in area.get("area", {}).get("name", ""):
+                      print(f"    👉 石狩地方の降水確率配列: {area.get('pops', [])}")
+
+              # --- 3. 気温ブロック (timeSeries[2]) ---
+              print("\n■ 【timeSeries[2]】3時間ごと気温(temps)のブロック")
+              ts2_times = time_series_list[2].get("timeDefines", [])
+              print(f"  時間定義数: {len(ts2_times)}")
+              for idx, t in enumerate(ts2_times):
+                  dt = datetime.fromisoformat(t.replace("Z", "+00:00")).astimezone(jst_tz)
+                  print(f"    Index [{idx}]: {dt.strftime('%Y-%m-%d %H:%M')} ({t})")
+              
+              for area in time_series_list[2].get("areas", []):
+                  if "札幌" in area.get("area", {}).get("name", "") or "14163" in str(area.get("area", {}).get("code", "")):
+                      print(f"    👉 札幌の気温配列: {area.get('temps', [])}")
+
+              print("\n============================================================")
 
           except Exception as e:
-              print(f"エラーが発生しました: {e}")
+              print(f"デバッグ実行中にエラーが発生しました: {e}")
           EOF
-          python debug_true_3hour.py
+          python debug_mapping.py
