@@ -98,7 +98,7 @@ jobs:
               cleaned_text = text.replace("｜", "").replace("┃", "").strip()
               mapping = {
                   "晴": "☀", "曇": "☁", "雨": "☔", "雪": "❄", "霧": "🌫", "みぞれ": "🌨",
-                  "後": "➡", "時々": "➡", "一時": "🕐"
+                  "後": "→", "時々": "｜", "一時": "｜"
               }
               result = ""
               current_text = cleaned_text
@@ -114,6 +114,10 @@ jobs:
                           break
                   if not matched:
                       current_text = current_text[1:]
+                      
+              # 末尾に残ってしまった記号を綺麗に削除
+              result = result.rstrip("→｜")
+              
               return result if result else "☁"
 
           def get_clothing_advice(temp):
