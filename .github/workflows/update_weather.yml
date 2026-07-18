@@ -22,16 +22,16 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 1. キャッシュの復元（v23にアップデート）
+      # 1. キャッシュの復元（v25にアップデート）
       - name: Restore Last Run Hour and Temp Cache
         uses: actions/cache/restore@v4
         with:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v23-
+          key: weather-v2-cache-v25-
           restore-keys: |
-            weather-v2-cache-v23-
+            weather-v2-cache-v25-
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -95,12 +95,13 @@ jobs:
           }
 
           def convert_weather_text_to_emoji(text):
+              cleaned_text = text.replace("｜", "").replace("┃", "").strip()
               mapping = {
                   "晴": "☀", "曇": "☁", "雨": "☔", "雪": "❄", "霧": "🌫", "みぞれ": "🌨",
-                  "後": "→", "時々": "｜", "一時": "｜"
+                  "後": "後", "時々": "時々", "一時": "一時"
               }
               result = ""
-              current_text = text
+              current_text = cleaned_text
               tokens = ["晴", "曇", "雨", "雪", "霧", "みぞれ", "後", "時々", "一時"]
               
               while current_text:
@@ -209,7 +210,6 @@ jobs:
               t_min_num = int(tmin_cleaned) if tmin_cleaned and tmin_cleaned.isdigit() else 14
               t_max_num = int(tmax_cleaned) if tmax_cleaned and tmax_cleaned.isdigit() else 25
 
-              # 前日比の計算処理
               min_diff_str = "(?)"
               max_diff_str = "(?)"
               history_data = {}
@@ -221,14 +221,12 @@ jobs:
                       pass
 
               if is_tomorrow_data:
-                  # 明日の予報を出す時：今日のキャッシュデータと比較
                   if today_date_str in history_data and isinstance(history_data[today_date_str], dict):
                       today_min = history_data[today_date_str].get("min")
                       today_max = history_data[today_date_str].get("max")
                       if today_min is not None: min_diff_str = format_diff(t_min_num - today_min)
                       if today_max is not None: max_diff_str = format_diff(t_max_num - today_max)
                   else:
-                      # キャッシュがない場合は当日の予測配列内の差分を試みる
                       try:
                           if len(temps) >= 4 and str(temps[0]).isdigit() and str(temps[1]).isdigit():
                               min_diff_str = format_diff(t_min_num - int(temps[0]))
@@ -236,7 +234,6 @@ jobs:
                       except:
                           pass
               else:
-                  # 今日の予報を出す時：昨日のキャッシュデータと比較
                   yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
                   if yesterday_str in history_data and isinstance(history_data[yesterday_str], dict):
                       yesterday_min = history_data[yesterday_str].get("min")
@@ -244,7 +241,6 @@ jobs:
                       if yesterday_min is not None: min_diff_str = format_diff(t_min_num - yesterday_min)
                       if yesterday_max is not None: max_diff_str = format_diff(t_max_num - yesterday_max)
 
-              # 今回のデータをキャッシュに保存
               if target_date_str not in history_data or not isinstance(history_data[target_date_str], dict):
                   history_data[target_date_str] = {}
               history_data[target_date_str]["min"] = t_min_num
@@ -276,7 +272,6 @@ jobs:
 
                   return history_data.get(pop_cache_key, max_prob)
 
-              # 1行目の表示を完全リニューアル
               forecast_lines = [f"最低:{t_min_num}°C{min_diff_str} 最高:{t_max_num}°C{max_diff_str}"]
               
               hourly_slots = [
@@ -300,12 +295,16 @@ jobs:
                   elif hour_val == "18": temp = t_max_num - 4
                   else: temp = t_min_num + 2
                   
-                  forecast_lines.append(f"{label} {temp}°C ({pop}%) {get_clothing_advice(temp)}")
+                  # 高度な等幅フォーマット処理（プロポーショナルフォントでのズレを防止）
+                  temp_str = f"{temp}°C".rjust(5, " ")  # 気温を5マス分で右詰め（-10°C や 5°C に対応）
+                  pop_str = f"({pop}%)".rjust(6, " ")  # 降水確率を6マス分で右詰め（(100%) や (0%) に対応）
+                  advice_str = get_clothing_advice(temp)
+                  
+                  forecast_lines.append(f"{label} {temp_str} {pop_str} {advice_str}")
                   valid_rows_count += 1
 
               weather_message = "\n".join(forecast_lines)
               
-              # キャッシュのクリーンアップ（辞書構造に対応）
               clean_history = {}
               for k, v in history_data.items():
                   if "pop-" in k:
@@ -356,7 +355,7 @@ jobs:
           EOF
           python update_weather.py
 
-      # 3. キャッシュの保存（v23にアップデート）
+      # 3. キャッシュの保存（v25にアップデート）
       - name: Save Run Hour and Temp Cache
         uses: actions/cache/save@v4
         if: success()
@@ -364,4 +363,4 @@ jobs:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v23-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: weather-v2-cache-v25-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
