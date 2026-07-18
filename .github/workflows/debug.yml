@@ -1,4 +1,4 @@
-name: Update Weather and Clothing for Dot V2 (JMA 3-Hour Debug Fix)
+name: Update Weather and Clothing for Dot V2 (JFR 3-Hour Debug)
 
 on:
   workflow_dispatch:
@@ -18,58 +18,49 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
-      - name: Run JMA 3-Hour API Debugger
+      - name: Run JFR 3-Hour API Debugger
         run: |
-          cat << 'EOF' > debug_3hour.py
+          cat << 'EOF' > debug_jfr.py
           import requests
-          import json
           from datetime import datetime, timedelta, timezone
 
-          # 気象庁の地域時系列予報（3時間ごと）の正式なデータソースURL
-          # 016000.json ではなく、石狩地方などの詳細を直接持つ「016000」以外の可能性も含め検証
-          URLS = [
-              "https://www.jma.go.jp/bosai/forecast/data/forecast/016000.json",
-              "https://www.jma.go.jp/bosai/forecast/data/jma/016000.json"
-          ]
+          # 地域時系列予報 (jfr) のURL
+          JMA_JFR_URL = "https://www.jma.go.jp/bosai/forecast/data/jfr/016000.json"
 
-          print("================ JMA 3-HOUR URL VERIFICATION ================")
-
-          for url in URLS:
-              print(f"\nTesting URL: {url}")
-              try:
-                  res = requests.get(url, timeout=15)
-                  print(f"Status Code: {res.status_code}")
-                  if res.status_code != 200:
-                      continue
-                      
-                  data = res.json()
-                  print("👉 JSONの取得に成功しました！")
+          try:
+              res = requests.get(JMA_JFR_URL, timeout=15)
+              print(f"Status Code: {res.status_code}")
+              if res.status_code != 200:
+                  print("URLが間違っているか、存在しません。")
+                  exit(1)
                   
-                  # 取得できたJSONの最上位のキーまたは長さを出力
-                  if isinstance(data, list):
-                      print(f"データ型: List (長さ: {len(data)})")
-                      # リストの場合、各要素のtimeSeriesの構造を確認
-                      for idx, block in enumerate(data):
-                          print(f"  Block [{idx}] keys: {block.keys()}")
-                          if "timeSeries" in block:
-                              for ts_idx, ts in enumerate(block["timeSeries"]):
-                                  t_defines = ts.get("timeDefines", [])
-                                  print(f"    timeSeries[{ts_idx}] timeDefines件数: {len(t_defines)}")
-                                  if t_defines:
-                                      print(f"      最初の時間: {t_defines[0]}")
-                                  
-                                  # エリアごとのデータの中身のキーをチェック
-                                  for area in ts.get("areas", []):
-                                      a_name = area.get("area", {}).get("name", "")
-                                      a_code = area.get("area", {}).get("code", "")
-                                      if "札幌" in a_name or "石狩" in a_name or str(a_code) in ["016010", "14163"]:
-                                          print(f"      エリア発見: {a_name} ({a_code}) -> キー一覧: {list(area.keys())}")
-                  else:
-                      print(f"データ型: Dict (キー一覧: {list(data.keys())})")
+              data = res.json()
+              print("================ JMA JFR (地域時系列) DEBUG LOG ================")
+              
+              # 通常、リストの形でブロックが入っています
+              for block_idx, block in enumerate(data):
+                  print(f"\nBlock [{block_idx}] keys: {list(block.keys())}")
+                  time_series = block.get("timeSeries", [])
+                  
+                  for ts_idx, ts in enumerate(time_series):
+                      t_defines = ts.get("timeDefines", [])
+                      print(f"  timeSeries[{ts_idx}] 時間定義数: {len(t_defines)}")
                       
-              except Exception as e:
-                  print(f"エラーが発生しました: {e}")
+                      # エリアのスキャン
+                      for area in ts.get("areas", []):
+                          a_name = area.get("area", {}).get("name", "")
+                          a_code = area.get("area", {}).get("code", "")
+                          if "札幌" in a_name or str(a_code) in ["016010", "14163"]:
+                              print(f"    👉 札幌エリア発見: {a_name} ({a_code})")
+                              print(f"      含まれるキー: {list(area.keys())}")
+                              # 3時間ごとの天気コードや気温の配列の頭出し
+                              for k, v in area.items():
+                                  if k != "area":
+                                      print(f"      {k}: {v[:8]}") # 最初の8件を表示
 
-          print("\n=============================================================")
+              print("\n=============================================================")
+
+          except Exception as e:
+              print(f"エラーが発生しました: {e}")
           EOF
-          python debug_3hour.py
+          python debug_jfr.py
