@@ -1,4 +1,4 @@
-name: Update Weather and Clothing for Dot V2 (JMA 3-Hour Debug)
+name: Update Weather and Clothing for Dot V2 (JMA 3-Hour Debug Fix)
 
 on:
   workflow_dispatch:
@@ -22,47 +22,54 @@ jobs:
         run: |
           cat << 'EOF' > debug_3hour.py
           import requests
+          import json
           from datetime import datetime, timedelta, timezone
 
-          # 3時間ごとの地域時系列予報用URLに変更
-          JMA_3HOUR_URL = "https://www.jma.go.jp/bosai/forecast/data/jma/016000.json"
+          # 気象庁の地域時系列予報（3時間ごと）の正式なデータソースURL
+          # 016000.json ではなく、石狩地方などの詳細を直接持つ「016000」以外の可能性も含め検証
+          URLS = [
+              "https://www.jma.go.jp/bosai/forecast/data/forecast/016000.json",
+              "https://www.jma.go.jp/bosai/forecast/data/jma/016000.json"
+          ]
 
-          try:
-              res = requests.get(JMA_3HOUR_URL, timeout=15).json()
-              jst_tz = timezone(timedelta(hours=9))
-              now = datetime.now(timezone.utc).astimezone(jst_tz)
+          print("================ JMA 3-HOUR URL VERIFICATION ================")
 
-              print("================ JMA 3-HOUR DEBUG LOG ================")
-              print(f"現在時刻 (JST): {now.strftime('%Y-%m-%d %H:%M:%S')}")
-              
-              # 通常、このJSONはリストではなく1つの大きな辞書構造になっています
-              # timeSeries 内の構造をスキャンします
-              time_series_list = res.get("timeSeries", [])
-              print(f"timeSeriesのブロック数: {len(time_series_list)}")
-
-              for ts_idx, ts in enumerate(time_series_list):
-                  time_defines = ts.get("timeDefines", [])
-                  print(f"\n▼ timeSeries[{ts_idx}] - 時間定義 ({len(time_defines)}件):")
-                  for idx, t_str in enumerate(time_defines[:4]): # 最初の4件だけサンプル表示
-                      cleaned_t = t_str.replace("Z", "+00:00")
-                      dt_parsed = datetime.fromisoformat(cleaned_t).astimezone(jst_tz)
-                      print(f"  Index [{idx}]: {dt_parsed.strftime('%m/%d %H:%M')}")
-
-                  print(f"--- areas 内のデータ探索 ---")
-                  for area_data in ts.get("areas", []):
-                      area_name = area_data.get("area", {}).get("name", "")
-                      area_code = area_data.get("area", {}).get("code", "")
+          for url in URLS:
+              print(f"\nTesting URL: {url}")
+              try:
+                  res = requests.get(url, timeout=15)
+                  print(f"Status Code: {res.status_code}")
+                  if res.status_code != 200:
+                      continue
                       
-                      if "札幌" in area_name or area_code in ["016010", "14163"]:
-                          print(f"  👉 エリア発見: {area_name} (コード: {area_code})")
-                          for k, v in area_data.items():
-                              if k != "area":
-                                  # 3時間ごとのデータ配列（最初の数件）を表示
-                                  print(f"    {k}: {v[:6]}")
+                  data = res.json()
+                  print("👉 JSONの取得に成功しました！")
+                  
+                  # 取得できたJSONの最上位のキーまたは長さを出力
+                  if isinstance(data, list):
+                      print(f"データ型: List (長さ: {len(data)})")
+                      # リストの場合、各要素のtimeSeriesの構造を確認
+                      for idx, block in enumerate(data):
+                          print(f"  Block [{idx}] keys: {block.keys()}")
+                          if "timeSeries" in block:
+                              for ts_idx, ts in enumerate(block["timeSeries"]):
+                                  t_defines = ts.get("timeDefines", [])
+                                  print(f"    timeSeries[{ts_idx}] timeDefines件数: {len(t_defines)}")
+                                  if t_defines:
+                                      print(f"      最初の時間: {t_defines[0]}")
+                                  
+                                  # エリアごとのデータの中身のキーをチェック
+                                  for area in ts.get("areas", []):
+                                      a_name = area.get("area", {}).get("name", "")
+                                      a_code = area.get("area", {}).get("code", "")
+                                      if "札幌" in a_name or "石狩" in a_name or str(a_code) in ["016010", "14163"]:
+                                          print(f"      エリア発見: {a_name} ({a_code}) -> キー一覧: {list(area.keys())}")
+                  else:
+                      print(f"データ型: Dict (キー一覧: {list(data.keys())})")
+                      
+              except Exception as e:
+                  print(f"エラーが発生しました: {e}")
 
-              print("\n===================================================")
-
-          except Exception as e:
-              print(f"デバッグ実行中にエラーが発生しました: {e}")
+          print("\n=============================================================")
           EOF
           python debug_3hour.py
