@@ -60,21 +60,16 @@ jobs:
                   print(f"\n▼ timeSeries[{ts_idx}] 内のエリア一覧:")
                   for area_data in ts.get("areas", []):
                       area_info = area_data.get("area", {})
-                      area_name = area_info.get("name")
-                      area_code = area_info.get("code")
+                      area_name = area_info.get("name", "")
+                      area_code = area_info.get("code", "")
                       print(f"  - エリア名: {area_name} (コード: {area_code})")
                       
-                      # 札幌市中央区のコード "016010" または "016000" に合致する場合、中身をダンプ
-                      if str(area_code) in ["016010", "016000"] or "石狩" in str(area_name):
-                          print(f"    👉 対象エリア合致！詳細データをダンプします:")
-                          if "weatherCodes" in area_data:
-                              print(f"      weatherCodes: {area_data['weatherCodes']}")
-                          if "temps" in area_data:
-                              print(f"      temps: {area_data['temps']}")
-                          if "weathers" in area_data:
-                              print(f"      weathers(テキストの天気): {area_data['weathers']}")
-                          if "winds" in area_data:
-                              print(f"      winds: {area_data['winds']}")
+                      # 「札幌」または「石狩」が含まれる場合、存在する全てのキーとデータをダンプ
+                      if str(area_code) in ["016010", "016000", "14163"] or "札幌" in str(area_name) or "石狩" in str(area_name):
+                          print(f"    👉 対象エリア合致！含まれるデータをすべて出力します:")
+                          for k, v in area_data.items():
+                              if k != "area": # エリア情報自体は上で出しているので除外
+                                  print(f"      {k}: {v}")
 
               print("\n===================================================")
 
