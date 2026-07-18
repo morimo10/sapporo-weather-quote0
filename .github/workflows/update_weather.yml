@@ -22,16 +22,16 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 1. キャッシュの復元（v21にアップデート）
+      # 1. キャッシュの復元（v22にアップデート）
       - name: Restore Last Run Hour and Temp Cache
         uses: actions/cache/restore@v4
         with:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v21-
+          key: weather-v2-cache-v22-
           restore-keys: |
-            weather-v2-cache-v21-
+            weather-v2-cache-v22-
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -62,7 +62,6 @@ jobs:
           JMA_FORECAST_URL = "https://www.jma.go.jp/bosai/forecast/data/forecast/016000.json"
           DOT_API_URL = f"https://dot.mindreset.tech/api/authV2/open/device/{DEVICE_ID}/text"
 
-          # 全94種類のweatherCodesマッピング辞書
           JMA_WEATHER_MAP = {
               "100": "晴", "101": "晴時々曇", "102": "晴一時雨", "103": "晴時々雨", "104": "晴一時雪",
               "105": "晴時々雪", "106": "晴一時雨か雪", "107": "晴時々雨か雪", "108": "晴一時雨か雷雨",
@@ -96,7 +95,6 @@ jobs:
           }
 
           def convert_weather_text_to_emoji(text):
-              """天気テキストを絵文字の並びに置換する"""
               mapping = {
                   "晴": "☀", "曇": "☁", "雨": "☔", "雪": "❄", "霧": "🌫", "みぞれ": "🌨",
                   "後": "後", "時々": "時々", "一時": "一時"
@@ -166,7 +164,6 @@ jobs:
               weather_areas = base_series['areas']
               sapporo_weather = next((a for a in weather_areas if a['area']['code'] == '016010'), weather_areas[0])
               
-              # マップ辞書を使って天気の絵文字タイトルを構築
               today_weather_code = sapporo_weather['weatherCodes'][day_idx]
               weather_plain_text = JMA_WEATHER_MAP.get(today_weather_code, "曇")
               weather_emoji_text = convert_weather_text_to_emoji(weather_plain_text)
@@ -241,22 +238,30 @@ jobs:
                   if len(temps) >= 4: history_data[today_date_str] = int(temps[1])
 
               def get_pop_data(target_hour_str):
-                  current_slot_pop = max_prob
+                  """指定時間に該当する（または内包する直近の）降水確率データを取得する"""
                   pop_cache_key = f"pop-{target_date_str}-{target_hour_str}"
                   base_dt = now + timedelta(days=1) if is_tomorrow_data else now
                   target_dt = base_dt.replace(hour=int(target_hour_str), minute=0, second=0, microsecond=0)
 
+                  # 完全一致またはその時間枠をカバーするデータを探す
+                  matched_pop = None
                   if hourly_pops and pop_times:
+                      best_diff = timedelta(days=1)
                       for t_str, pop in zip(pop_times, hourly_pops):
                           dt_parsed = datetime.fromisoformat(t_str.replace("Z", "+00:00")).astimezone(jst)
-                          if dt_parsed == target_dt and str(pop).strip() != "":
-                              current_slot_pop = int(pop)
-                              history_data[pop_cache_key] = current_slot_pop
-                              break
-                  else:
-                      if pop_cache_key in history_data:
-                          current_slot_pop = history_data[pop_cache_key]
-                  return current_slot_pop
+                          # 気象庁のデータ時刻がターゲット時刻と同じ、またはターゲットより過去で一番近いものを探す（6時間枠をカバー）
+                          if dt_parsed <= target_dt:
+                              diff = target_dt - dt_parsed
+                              if diff < best_diff and diff < timedelta(hours=6) and str(pop).strip() != "":
+                                  best_diff = diff
+                                  matched_pop = int(pop)
+                      
+                      if matched_pop is not None:
+                          history_data[pop_cache_key] = matched_pop
+                          return matched_pop
+
+                  # キャッシュがあればそれを利用、なければ日最大値をフォールバック
+                  return history_data.get(pop_cache_key, max_prob)
 
               forecast_lines = [f"低:{t_min_num}°C 高:{t_max_num}°C{diff_str} 傘:{prob_str}{umbrella_mark}"]
               hourly_slots = [
@@ -280,7 +285,6 @@ jobs:
                   elif hour_val == "18": temp = t_max_num - 4
                   else: temp = t_min_num + 2
                   
-                  # フォーマット指定: 「09:00 25°C (20%) 半袖」
                   forecast_lines.append(f"{label} {temp}°C ({pop}%) {get_clothing_advice(temp)}")
                   valid_rows_count += 1
 
@@ -325,7 +329,7 @@ jobs:
           EOF
           python update_weather.py
 
-      # 3. キャッシュの保存（v21にアップデート）
+      # 3. キャッシュの保存（v22にアップデート）
       - name: Save Run Hour and Temp Cache
         uses: actions/cache/save@v4
         if: success()
@@ -333,4 +337,4 @@ jobs:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v21-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: weather-v2-cache-v22-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
