@@ -22,16 +22,16 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 1. キャッシュの復元（v22にアップデート）
+      # 1. キャッシュの復元（v23にアップデート）
       - name: Restore Last Run Hour and Temp Cache
         uses: actions/cache/restore@v4
         with:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v22-
+          key: weather-v2-cache-v23-
           restore-keys: |
-            weather-v2-cache-v22-
+            weather-v2-cache-v23-
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -124,6 +124,12 @@ jobs:
               elif temp >= 10: return "コート"
               else: return "ダウン"
 
+          def format_diff(diff_val):
+              if diff_val is None: return "(?)"
+              if diff_val > 0: return f"(+{diff_val})"
+              elif diff_val < 0: return f"({diff_val})"
+              else: return "(±0)"
+
           try:
               jst = timezone(timedelta(hours=9))
               now_utc = datetime.now(timezone.utc)
@@ -183,8 +189,6 @@ jobs:
                   if dt_parsed.strftime("%Y-%m-%d") == target_date_str and str(pop).strip() != "":
                       day_pops.append(int(pop))
               max_prob = max(day_pops) if day_pops else 0
-              prob_str = f"{max_prob}%"
-              umbrella_mark = "☔" if max_prob >= 50 else ("☂" if max_prob >= 30 else "")
 
               temp_series = res[0]['timeSeries'][2]
               temp_areas = temp_series['areas']
@@ -205,7 +209,9 @@ jobs:
               t_min_num = int(tmin_cleaned) if tmin_cleaned and tmin_cleaned.isdigit() else 14
               t_max_num = int(tmax_cleaned) if tmax_cleaned and tmax_cleaned.isdigit() else 25
 
-              diff_str = "(?)"
+              # 前日比の計算処理
+              min_diff_str = "(?)"
+              max_diff_str = "(?)"
               history_data = {}
               if os.path.exists(history_file):
                   try:
@@ -215,41 +221,49 @@ jobs:
                       pass
 
               if is_tomorrow_data:
-                  if today_date_str in history_data:
-                      today_max = history_data[today_date_str] if isinstance(history_data[today_date_str], (int, float)) else 25
-                      diff = t_max_num - today_max
-                      diff_str = f"(+{diff})" if diff > 0 else (f"({diff})" if diff < 0 else "(±0)")
+                  # 明日の予報を出す時：今日のキャッシュデータと比較
+                  if today_date_str in history_data and isinstance(history_data[today_date_str], dict):
+                      today_min = history_data[today_date_str].get("min")
+                      today_max = history_data[today_date_str].get("max")
+                      if today_min is not None: min_diff_str = format_diff(t_min_num - today_min)
+                      if today_max is not None: max_diff_str = format_diff(t_max_num - today_max)
                   else:
+                      # キャッシュがない場合は当日の予測配列内の差分を試みる
                       try:
-                          if len(temps) >= 4 and str(temps[1]).isdigit() and int(temps[1]) != t_max_num:
-                              diff = t_max_num - int(temps[1])
-                              diff_str = f"(+{diff})" if diff > 0 else (f"({diff})" if diff < 0 else "(±0)")
+                          if len(temps) >= 4 and str(temps[0]).isdigit() and str(temps[1]).isdigit():
+                              min_diff_str = format_diff(t_min_num - int(temps[0]))
+                              max_diff_str = format_diff(t_max_num - int(temps[1]))
                       except:
                           pass
               else:
+                  # 今日の予報を出す時：昨日のキャッシュデータと比較
                   yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
-                  if yesterday_str in history_data:
-                      yesterday_max = history_data[yesterday_str] if isinstance(history_data[yesterday_str], (int, float)) else 25
-                      diff = t_max_num - yesterday_max
-                      diff_str = f"(+{diff})" if diff > 0 else (f"({diff})" if diff < 0 else "(±0)")
+                  if yesterday_str in history_data and isinstance(history_data[yesterday_str], dict):
+                      yesterday_min = history_data[yesterday_str].get("min")
+                      yesterday_max = history_data[yesterday_str].get("max")
+                      if yesterday_min is not None: min_diff_str = format_diff(t_min_num - yesterday_min)
+                      if yesterday_max is not None: max_diff_str = format_diff(t_max_num - yesterday_max)
 
-              history_data[target_date_str] = t_max_num
-              if is_tomorrow_data and today_date_str not in history_data:
-                  if len(temps) >= 4: history_data[today_date_str] = int(temps[1])
+              # 今回のデータをキャッシュに保存
+              if target_date_str not in history_data or not isinstance(history_data[target_date_str], dict):
+                  history_data[target_date_str] = {}
+              history_data[target_date_str]["min"] = t_min_num
+              history_data[target_date_str]["max"] = t_max_num
+
+              if is_tomorrow_data and (today_date_str not in history_data or not isinstance(history_data[today_date_str], dict)):
+                  if len(temps) >= 4 and str(temps[0]).isdigit() and str(temps[1]).isdigit():
+                      history_data[today_date_str] = {"min": int(temps[0]), "max": int(temps[1])}
 
               def get_pop_data(target_hour_str):
-                  """指定時間に該当する（または内包する直近の）降水確率データを取得する"""
                   pop_cache_key = f"pop-{target_date_str}-{target_hour_str}"
                   base_dt = now + timedelta(days=1) if is_tomorrow_data else now
                   target_dt = base_dt.replace(hour=int(target_hour_str), minute=0, second=0, microsecond=0)
 
-                  # 完全一致またはその時間枠をカバーするデータを探す
                   matched_pop = None
                   if hourly_pops and pop_times:
                       best_diff = timedelta(days=1)
                       for t_str, pop in zip(pop_times, hourly_pops):
                           dt_parsed = datetime.fromisoformat(t_str.replace("Z", "+00:00")).astimezone(jst)
-                          # 気象庁のデータ時刻がターゲット時刻と同じ、またはターゲットより過去で一番近いものを探す（6時間枠をカバー）
                           if dt_parsed <= target_dt:
                               diff = target_dt - dt_parsed
                               if diff < best_diff and diff < timedelta(hours=6) and str(pop).strip() != "":
@@ -260,10 +274,11 @@ jobs:
                           history_data[pop_cache_key] = matched_pop
                           return matched_pop
 
-                  # キャッシュがあればそれを利用、なければ日最大値をフォールバック
                   return history_data.get(pop_cache_key, max_prob)
 
-              forecast_lines = [f"低:{t_min_num}°C 高:{t_max_num}°C{diff_str} 傘:{prob_str}{umbrella_mark}"]
+              # 1行目の表示を完全リニューアル
+              forecast_lines = [f"最低:{t_min_num}°C{min_diff_str} 最高:{t_max_num}°C{max_diff_str}"]
+              
               hourly_slots = [
                   ("06", "06:00"), ("09", "09:00"), ("12", "12:00"),
                   ("15", "15:00"), ("18", "18:00"), ("21", "21:00")
@@ -289,7 +304,19 @@ jobs:
                   valid_rows_count += 1
 
               weather_message = "\n".join(forecast_lines)
-              clean_history = {k: v for k, v in history_data.items() if "pop-" in k or (k.count("-") == 2 and (now - datetime.strptime(k, "%Y-%m-%d").replace(tzinfo=jst)).days <= 3)}
+              
+              # キャッシュのクリーンアップ（辞書構造に対応）
+              clean_history = {}
+              for k, v in history_data.items():
+                  if "pop-" in k:
+                      clean_history[k] = v
+                  elif k.count("-") == 2:
+                      try:
+                          if (now - datetime.strptime(k, "%Y-%m-%d").replace(tzinfo=jst)).days <= 3:
+                              clean_history[k] = v
+                      except:
+                          pass
+                          
               with open(history_file, "w") as f:
                   json.dump(clean_history, f)
 
@@ -329,7 +356,7 @@ jobs:
           EOF
           python update_weather.py
 
-      # 3. キャッシュの保存（v22にアップデート）
+      # 3. キャッシュの保存（v23にアップデート）
       - name: Save Run Hour and Temp Cache
         uses: actions/cache/save@v4
         if: success()
@@ -337,4 +364,4 @@ jobs:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v22-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: weather-v2-cache-v23-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
