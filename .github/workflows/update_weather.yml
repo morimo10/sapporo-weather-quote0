@@ -97,7 +97,7 @@ jobs:
           def convert_weather_text_to_emoji(text):
               mapping = {
                   "晴": "☀", "曇": "☁", "雨": "☔", "雪": "❄", "霧": "🌫", "みぞれ": "🌨",
-                  "後": "後", "時々": "時々", "一時": "一時"
+                  "後": "→", "時々": "｜", "一時": "｜"
               }
               result = ""
               current_text = text
