@@ -1,4 +1,4 @@
-name: Update Weather and Clothing for Dot V2 (JFR 3-Hour Debug)
+name: Update Weather and Clothing for Dot V2 (True 3-Hour Debug)
 
 on:
   workflow_dispatch:
@@ -18,49 +18,47 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
-      - name: Run JFR 3-Hour API Debugger
+      - name: Run True 3-Hour API Debugger
         run: |
-          cat << 'EOF' > debug_jfr.py
+          cat << 'EOF' > debug_true_3hour.py
           import requests
           from datetime import datetime, timedelta, timezone
 
-          # 地域時系列予報 (jfr) のURL
-          JMA_JFR_URL = "https://www.jma.go.jp/bosai/forecast/data/jfr/016000.json"
+          # 石狩地方 (札幌) の地域時系列予報用URL
+          URL = "https://www.jma.go.jp/bosai/forecast/data/jma/016010.json"
 
           try:
-              res = requests.get(JMA_JFR_URL, timeout=15)
+              res = requests.get(URL, timeout=15)
               print(f"Status Code: {res.status_code}")
               if res.status_code != 200:
-                  print("URLが間違っているか、存在しません。")
+                  print("URLが存在しません。")
                   exit(1)
                   
               data = res.json()
-              print("================ JMA JFR (地域時系列) DEBUG LOG ================")
+              print("================ JMA TRUE 3-HOUR DEBUG LOG ================")
               
-              # 通常、リストの形でブロックが入っています
-              for block_idx, block in enumerate(data):
-                  print(f"\nBlock [{block_idx}] keys: {list(block.keys())}")
-                  time_series = block.get("timeSeries", [])
+              # 時系列データのスキャン
+              time_series = data.get("timeSeries", [])
+              print(f"timeSeriesのブロック数: {len(time_series)}")
+              
+              for ts_idx, ts in enumerate(time_series):
+                  t_defines = ts.get("timeDefines", [])
+                  print(f"\n▼ timeSeries[{ts_idx}] 時間定義数: {len(t_defines)}")
+                  if t_defines:
+                      print(f"  最初の時間サンプル: {t_defines[:3]}")
                   
-                  for ts_idx, ts in enumerate(time_series):
-                      t_defines = ts.get("timeDefines", [])
-                      print(f"  timeSeries[{ts_idx}] 時間定義数: {len(t_defines)}")
-                      
-                      # エリアのスキャン
-                      for area in ts.get("areas", []):
-                          a_name = area.get("area", {}).get("name", "")
-                          a_code = area.get("area", {}).get("code", "")
-                          if "札幌" in a_name or str(a_code) in ["016010", "14163"]:
-                              print(f"    👉 札幌エリア発見: {a_name} ({a_code})")
-                              print(f"      含まれるキー: {list(area.keys())}")
-                              # 3時間ごとの天気コードや気温の配列の頭出し
-                              for k, v in area.items():
-                                  if k != "area":
-                                      print(f"      {k}: {v[:8]}") # 最初の8件を表示
+                  for area in ts.get("areas", []):
+                      a_name = area.get("area", {}).get("name", "")
+                      a_code = area.get("area", {}).get("code", "")
+                      print(f"    👉 エリア: {a_name} ({a_code})")
+                      print(f"      含まれるキー: {list(area.keys())}")
+                      for k, v in area.items():
+                          if k != "area":
+                              print(f"      {k}: {v[:4]}") # 最初の4件をダンプ
 
               print("\n=============================================================")
 
           except Exception as e:
               print(f"エラーが発生しました: {e}")
           EOF
-          python debug_jfr.py
+          python debug_true_3hour.py
