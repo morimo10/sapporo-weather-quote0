@@ -102,8 +102,8 @@ jobs:
           def get_clothing_advice(temp):
               if temp is None: return "不明？"
               if temp >= 30: return "Ｔシャツ"
-              elif temp >= 25: return "半袖"
-              elif temp >= 20: return "長袖"
+              elif temp >= 25: return "半袖シャツ"
+              elif temp >= 20: return "長袖シャツ"
               elif temp >= 15: return "ジャケット"
               elif temp >= 10: return "コート"
               else: return "ダウン"
@@ -157,7 +157,7 @@ jobs:
               today_weather_code = sapporo_weather['weatherCodes'][day_idx]
               weather_plain_text = JMA_WEATHER_MAP.get(today_weather_code, "☁")
               weather_emoji_text = convert_weather_text_to_emoji(weather_plain_text)
-              title_text = f"{label_head}札幌市中央区{weather_emoji_text}"
+              title_text = f"{label_head}の札幌中央　{weather_emoji_text}"
 
               hourly_series = res[0]['timeSeries'][1]
               hourly_times_root = hourly_series['timeDefines']
