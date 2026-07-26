@@ -22,16 +22,17 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 1. キャッシュの復元（v25にアップデート）
+      # 1. キャッシュの復元
       - name: Restore Last Run Hour and Temp Cache
         uses: actions/cache/restore@v4
         with:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v25-
+          key: weather-v2-cache-v25-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             weather-v2-cache-v25-
+
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -337,12 +338,12 @@ jobs:
           EOF
           python update_weather.py
 
-      # 3. キャッシュの保存（v25にアップデート）
+      # 3. キャッシュの保存
       - name: Save Run Hour and Temp Cache
         uses: actions/cache/save@v4
-        if: success()
+        if: always() # エラー時でもできる限り保存したい場合は always() や success()
         with:
           path: |
             last_run_hour.txt
             weather_history.json
-          key: weather-v2-cache-v25-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: weather-v2-cache-v25-${{ github.run_id }}-${{ github.run_attempt }}
