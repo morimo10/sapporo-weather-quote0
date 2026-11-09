@@ -33,7 +33,6 @@ jobs:
           restore-keys: |
             weather-v2-cache-v25-
 
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -63,41 +62,40 @@ jobs:
           JMA_FORECAST_URL = "https://www.jma.go.jp/bosai/forecast/data/forecast/016000.json"
           DOT_API_URL = f"https://dot.mindreset.tech/api/authV2/open/device/{DEVICE_ID}/text"
 
-          # 天気コードから直接視認性の高い絵文字表現へマッピング
+          # 天気コードから直接視認性の高い表現へマッピング（雪マークは文字化け防止のため ❆ に統一）
           JMA_WEATHER_MAP = {
-              "100": "☀", "101": "☀│☁", "102": "☀│☔", "103": "☀│☔", "104": "☀│❄",
-              "105": "☀│❄", "106": "☀│☔❄", "107": "☀│☔❄", "108": "☀│☔⚡",
+              "100": "☀", "101": "☀│☁", "102": "☀│☔", "103": "☀│☔", "104": "☀│❆",
+              "105": "☀│❆", "106": "☀│☔❆", "107": "☀│☔❆", "108": "☀│☔⚡",
               "110": "☀→☁", "111": "☀→☁", "112": "☀→☔", "113": "☀→☔", "114": "☀→☔",
-              "115": "☀→❄", "116": "☀→❄", "117": "☀→❄", "118": "☀→☔❄", "119": "☀→☔⚡",
+              "115": "☀→❆", "116": "☀→❆", "117": "☀→❆", "118": "☀→☔❆", "119": "☀→☔⚡",
               "120": "☀│☔", "121": "☀│☔", "122": "☀│☔", "123": "☀│☔⚡",
-              "124": "☀│❄", "125": "☀│☔⚡", "126": "☀→☔", "127": "☀→☔", "128": "☀→☔",
+              "124": "☀│❆", "125": "☀│☔⚡", "126": "☀→☔", "127": "☀→☔", "128": "☀→☔",
               "130": "🌫→☀", "131": "☀│🌫", "132": "☀│☁", "140": "☀│☔⚡",
-              "160": "☀│☔❄", "170": "☀│☔❄", "181": "☀→☔❄",
+              "160": "☀│☔❆", "170": "☀│☔❆", "181": "☀→☔❆",
               
-              "200": "☁", "201": "☁│☀", "202": "☁│☔", "203": "☁│☔", "204": "☁│❄",
-              "205": "☁│❄", "206": "☁│☔❄", "207": "☁│☔❄", "208": "☁│☔⚡", "209": "🌫",
+              "200": "☁", "201": "☁│☀", "202": "☁│☔", "203": "☁│☔", "204": "☁│❆",
+              "205": "☁│❆", "206": "☁│☔❆", "207": "☁│☔❆", "208": "☁│☔⚡", "209": "🌫",
               "210": "☁→☀", "211": "☁→☀", "212": "☁→☔", "213": "☁→☔", "214": "☁→☔",
-              "215": "☁→❄", "216": "☁→❄", "217": "☁→❄", "218": "☁→☔❄", "219": "☁→☔⚡",
+              "215": "☁→❆", "216": "☁→❆", "217": "☁→❆", "218": "☁→☔❆", "219": "☁→☔⚡",
               "220": "☁│☔", "221": "☁│☔", "222": "☁│☔", "223": "☁│☀",
-              "224": "☁→☔", "225": "☁→☔", "226": "☁→☔", "228": "☁→❄", "229": "☁→❄",
-              "230": "☁→❄", "231": "☁│🌫", "240": "☁│☔⚡", "250": "☁│❄⚡",
-              "260": "☁│☔❄", "270": "☁│☔❄", "281": "☁→☔❄",
+              "224": "☁→☔", "225": "☁→☔", "226": "☁→☔", "228": "☁→❆", "229": "☁→❆",
+              "230": "☁→❆", "231": "☁│🌫", "240": "☁│☔⚡", "250": "☁│❆⚡",
+              "260": "☁│☔❆", "270": "☁│☔❆", "281": "☁→☔❆",
               
-              "300": "☔", "301": "☔│☀", "302": "☔│☁", "303": "☔│❄", "304": "☔│❄",
-              "306": "☔☔", "308": "☔🌪", "309": "☔│❄", "311": "☔→☀", "313": "☔→☁",
-              "314": "☔→❄", "315": "☔→❄", "316": "☔❄→☀", "317": "☔❄→☁", "320": "☔→☀",
-              "321": "☔→☁", "322": "☔│❄", "323": "☔→☀", "324": "☔→☀", "325": "☔→☀",
-              "326": "☔→❄", "327": "☔→❄", "328": "☔☔", "329": "☔❄", "340": "☔│❄",
-              "350": "☔⚡", "361": "☔❄→☀", "371": "☔❄→☁",
+              "300": "☔", "301": "☔│☀", "302": "☔│☁", "303": "☔│❆", "304": "☔│❆",
+              "306": "☔☔", "308": "☔🌪", "309": "☔│❆", "311": "☔→☀", "313": "☔→☁",
+              "314": "☔→❆", "315": "☔→❆", "316": "☔❆→☀", "317": "☔❆→☁", "320": "☔→☀",
+              "321": "☔→☁", "322": "☔│❆", "323": "☔→☀", "324": "☔→☀", "325": "☔→☀",
+              "326": "☔→❆", "327": "☔→❆", "328": "☔☔", "329": "☔❆", "340": "☔│❆",
+              "350": "☔⚡", "361": "☔❆→☀", "371": "☔❆→☁",
               
-              "400": "❄", "401": "❄│☀", "402": "❄│☁", "403": "❄│☔", "405": "❄❄",
-              "406": "❄🌪", "407": "❄🌪", "409": "❄│☔", "411": "❄→☀", "413": "❄→☁",
-              "414": "❄→☔", "420": "❄→☀", "421": "❄→☁", "422": "❄→☔", "423": "❄→☔",
-              "425": "❄❄", "426": "❄→☔", "427": "❄│☔", "450": "❄⚡"
+              "400": "❆", "401": "❆│☀", "402": "❆│☁", "403": "❆│☔", "405": "❆❆",
+              "406": "❆🌪", "407": "❆🌪", "409": "❆│☔", "411": "❆→☀", "413": "❆→☁",
+              "414": "❆→☔", "420": "❆→☀", "421": "❆→☁", "422": "❆→☔", "423": "❆→☔",
+              "425": "❆❆", "426": "❆→☔", "427": "❆│☔", "450": "❆⚡"
           }
 
           def convert_weather_text_to_emoji(text):
-              # マッピングで直接絵文字化されているため、そのまま返す
               return text if text else "☁"
 
           def get_clothing_advice(temp):
@@ -176,23 +174,37 @@ jobs:
               max_prob = max(day_pops) if day_pops else 0
 
               temp_series = res[0]['timeSeries'][2]
-              temp_areas = temp_series['areas']
+              temp_times = temp_series.get('timeDefines', [])
+              temp_areas = temp_series.get('areas', [])
               sapporo_temp = next((a for a in temp_areas if str(a['area']['code']).startswith("0160")), temp_areas[0])
-              temps = sapporo_temp['temps']
-              tmin_raw = temps[2] if is_tomorrow_data and len(temps) >= 4 else (temps[0] if len(temps) > 0 else "14")
-              tmax_raw = temps[3] if is_tomorrow_data and len(temps) >= 4 else (temps[1] if len(temps) > 1 else "25")
+              temps = sapporo_temp.get('temps', [])
 
-              if not is_tomorrow_data and (not tmin_raw or str(tmin_raw).strip() == "" or tmin_raw == tmax_raw):
-                  try:
-                      tmin_raw = res[1]['timeSeries'][1]['areas'][0]['tempsMin'][0]
-                  except:
-                      tmin_raw = "14"
-              if not tmax_raw or str(tmax_raw).strip() == "": tmax_raw = "25"
+              tmin_raw = None
+              tmax_raw = None
 
-              tmin_cleaned = str(tmin_raw).strip()
-              tmax_cleaned = str(tmax_raw).strip()
-              t_min_num = int(tmin_cleaned) if tmin_cleaned and tmin_cleaned.isdigit() else 14
-              t_max_num = int(tmax_cleaned) if tmax_cleaned and tmax_cleaned.isdigit() else 25
+              for idx, t_str in enumerate(temp_times):
+                  dt_parsed = datetime.fromisoformat(t_str.replace("Z", "+00:00")).astimezone(jst)
+                  if dt_parsed.strftime("%Y-%m-%d") == target_date_str:
+                      base_idx = idx * 2
+                      if base_idx + 1 < len(temps):
+                          val1 = temps[base_idx]
+                          val2 = temps[base_idx + 1]
+                          if val1 and val2 and str(val1).strip() != "" and str(val2).strip() != "":
+                              try:
+                                  v1, v2 = int(val1), int(val2)
+                                  tmin_raw = min(v1, v2)
+                                  tmax_raw = max(v1, v2)
+                                  break
+                              except ValueError:
+                                  pass
+
+              if tmin_raw is None:
+                  tmin_raw = 14
+              if tmax_raw is None:
+                  tmax_raw = 25
+
+              t_min_num = int(tmin_raw)
+              t_max_num = int(tmax_raw)
 
               min_diff_str = "(?)"
               max_diff_str = "(?)"
@@ -210,13 +222,6 @@ jobs:
                       today_max = history_data[today_date_str].get("max")
                       if today_min is not None: min_diff_str = format_diff(t_min_num - today_min)
                       if today_max is not None: max_diff_str = format_diff(t_max_num - today_max)
-                  else:
-                      try:
-                          if len(temps) >= 4 and str(temps[0]).isdigit() and str(temps[1]).isdigit():
-                              min_diff_str = format_diff(t_min_num - int(temps[0]))
-                              max_diff_str = format_diff(t_max_num - int(temps[1]))
-                      except:
-                          pass
               else:
                   yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
                   if yesterday_str in history_data and isinstance(history_data[yesterday_str], dict):
@@ -229,10 +234,6 @@ jobs:
                   history_data[target_date_str] = {}
               history_data[target_date_str]["min"] = t_min_num
               history_data[target_date_str]["max"] = t_max_num
-
-              if is_tomorrow_data and (today_date_str not in history_data or not isinstance(history_data[today_date_str], dict)):
-                  if len(temps) >= 4 and str(temps[0]).isdigit() and str(temps[1]).isdigit():
-                      history_data[today_date_str] = {"min": int(temps[0]), "max": int(temps[1])}
 
               def get_pop_data(target_hour_str):
                   pop_cache_key = f"pop-{target_date_str}-{target_hour_str}"
@@ -341,7 +342,7 @@ jobs:
       # 3. キャッシュの保存
       - name: Save Run Hour and Temp Cache
         uses: actions/cache/save@v4
-        if: always() # エラー時でもできる限り保存したい場合は always() や success()
+        if: always()
         with:
           path: |
             last_run_hour.txt
